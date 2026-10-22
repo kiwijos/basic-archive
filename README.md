@@ -12,10 +12,14 @@ A microservice archive for scanned ship documents. See [GLOSSARY.md](GLOSSARY.md
 ```
 make cluster-tools   # once per cluster: Traefik and metrics-server, versions pinned
 make deploy          # creates Secrets if missing, applies everything, waits for readiness
-make smoke           # creates a Ship through the Ingress and reads it back
+make smoke           # exercises the API through the Ingress and the object storage behind it
 ```
 
-The app is served on `http://localhost`. `make deploy` generates random Secrets on first run; set `STAFF_NAMES="alice bob"` to choose the staff names the tokens belong to. Real Secrets are never committed, see `k8s/secrets.template.yaml` for their shape.
+`make deploy` runs two Jobs each time, both safe to repeat: the database migration, and `garage-init`, which prepares Garage (cluster layout, the `masters` and `derivatives` buckets, one access key per service with only the rights it needs). Garage keeps its data on a 5 Gi volume and runs as a single instance.
+
+The app is served on `http://localhost`. `make deploy` generates random Secrets on first run and adds any a newer slice needs; set `STAFF_NAMES="alice bob"` to choose the staff names the tokens belong to. Real Secrets are never committed, see `k8s/secrets.template.yaml` for their shape.
+
+An image rebuilt under a tag that is already deployed is not picked up by `make deploy`, and the cluster node keeps its cached copy too. To use a local rebuild, remove the node's copy and restart: `docker exec desktop-control-plane crictl rmi docker.io/kiwijos/ship-archive-catalog-api:<tag>` then `kubectl -n ship-archive rollout restart deployment/catalog-api`.
 
 ## Tests
 

@@ -32,6 +32,15 @@ spec:
           envFrom:
             - secretRef:
                 name: catalog-api-secrets
+            - secretRef:
+                name: catalog-api-s3
+          env:
+            - name: S3_ENDPOINT_URL
+              value: http://garage:3900
+            - name: S3_REGION
+              value: garage
+            - name: MASTERS_BUCKET
+              value: masters
           # Ready only once the migration Job has brought the schema to the latest revision.
           readinessProbe:
             httpGet:

@@ -72,4 +72,81 @@ api DELETE "/ships/$rebuilt" >/dev/null || fail "deleting a Ship failed"
 status=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/catalog/ships/$rebuilt" -H "Authorization: Bearer $token")
 [ "$status" = 404 ] || fail "a deleted Ship returned $status, expected 404"
 
-echo "SMOKE OK: ship $id created and read back as $staff_name; renames, sale, rebuild, validation and delete verified"
+# An Image is uploaded, stored in Garage, linked to the ship, and a re-upload is flagged.
+scan=$(mktemp); pdf=$(mktemp)
+trap 'rm -f "$scan" "$pdf"' EXIT
+python3 - "$scan" "$run" <<'PY'
+import struct, sys, zlib
+
+def chunk(kind, data):
+    body = kind + data
+    return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+width, height = 200, 100
+rows = b"".join(b"\x00" + b"\xff" * width for _ in range(height))
+png = (
+    b"\x89PNG\r\n\x1a\n"
+    + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+    + chunk(b"tEXt", b"Comment\x00smoke run " + sys.argv[2].encode())  # makes every run's file unique
+    + chunk(b"IDAT", zlib.compress(rows))
+    + chunk(b"IEND", b"")
+)
+open(sys.argv[1], "wb").write(png)
+PY
+upload() { # upload FILE_PATH TITLE: print the JSON answer, fail on any non-2xx status
+  curl -sf -X POST "$BASE_URL/api/catalog/documents" -H "Authorization: Bearer $token" \
+    -F "file=@$1;type=image/png" -F "title=$2" -F document_type=letter -F rights=PDM
+}
+first=$(upload "$scan" "Smoke image $run") || fail "uploading an Image failed"
+read -r image document mime review_status duplicate < <(
+  echo "$first" | jq -r '[.images[0].id, .id, .images[0].mime, .images[0].review_status, (.duplicate_of_image_id // "none")] | @tsv')
+[ "$mime" = image/png ] || fail "mime not recorded: $first"
+[ "$review_status" = pending ] || fail "a new Image is not pending"
+[ "$duplicate" = none ] || fail "a new Image was flagged as a duplicate"
+second=$(upload "$scan" "Smoke image again $run") || fail "uploading the same Image again failed"
+[ "$(echo "$second" | jq -r .duplicate_of_image_id)" = "$image" ] || fail "duplicate not flagged: $second"
+
+printf '%%PDF-1.7 not an image' > "$pdf"
+refusal=$(curl -s -w '\n%{http_code}' -X POST "$BASE_URL/api/catalog/documents" -H "Authorization: Bearer $token" \
+  -F "file=@$pdf;filename=scan.jpg;type=image/jpeg" -F "title=Not an image")
+refusal_status=$(echo "$refusal" | tail -1)
+refusal_detail=$(echo "$refusal" | head -1 | jq -r .detail)
+[ "$refusal_status" = 415 ] || fail "a PDF named .jpg returned $refusal_status, expected 415"
+{ echo "$refusal_detail" | grep -q PDF && echo "$refusal_detail" | grep -q HEIC; } || fail "the refusal does not mention PDF and HEIC: $refusal_detail"
+
+api PUT "/documents/$document/subjects/$ship" '{"role":"depicted"}' >/dev/null || fail "linking the document to the ship failed"
+[ "$(api GET "/documents/$document" | jq -r '.subjects[0].name')" = Nordstjernan ] || fail "the link did not read back"
+
+# The download address works from inside the cluster, where Garage is reachable, and then expires.
+fetch() { # fetch URL: print "<http status> <sha256 of the body>"
+  kubectl -n "$NAMESPACE" exec deploy/catalog-api -- python -c '
+import hashlib, sys, urllib.error, urllib.request
+try:
+    answer = urllib.request.urlopen(sys.argv[1], timeout=10)
+    print(answer.status, hashlib.sha256(answer.read()).hexdigest())
+except urllib.error.HTTPError as error:
+    print(error.code, "-")' "$1"
+}
+address=$(api GET "/images/$image/download-url?expires_in=3" | jq -r .url)
+expected=$(shasum -a 256 "$scan" | cut -d' ' -f1)
+[ "$(fetch "$address")" = "200 $expected" ] || fail "the download address did not serve the uploaded bytes"
+sleep 4
+expired=$(fetch "$address" | cut -d' ' -f1)
+case "$expired" in 4??) ;; *) fail "the download address returned $expired after it expired, expected a 4xx" ;; esac
+
+# Only catalog-api may write; Cantaloupe's key may only read the masters. The keys go to the
+# probe on stdin, never on a command line where `ps` would show them.
+key_of() { kubectl -n "$NAMESPACE" get secret "$1" -o jsonpath="{.data.$2}" | base64 -d; }
+probe_script=$(cat "$(dirname "$0")/s3_probe.py")
+probe() {
+  printf '%s\n%s\n' "$(key_of "$1" S3_ACCESS_KEY_ID)" "$(key_of "$1" S3_SECRET_ACCESS_KEY)" \
+    | kubectl -n "$NAMESPACE" exec -i deploy/catalog-api -- python -c "$probe_script"
+}
+catalog_rights=$(probe catalog-api-s3)
+echo "$catalog_rights" | jq -e '. == {"read derivatives": "denied", "read masters": "allowed", "write derivatives": "denied", "write masters": "allowed"}' >/dev/null \
+  || fail "catalog-api's key has the wrong rights: $catalog_rights"
+cantaloupe_rights=$(probe cantaloupe-s3)
+echo "$cantaloupe_rights" | jq -e '. == {"read derivatives": "denied", "read masters": "allowed", "write derivatives": "denied", "write masters": "denied"}' >/dev/null \
+  || fail "Cantaloupe's key has the wrong rights: $cantaloupe_rights"
+
+echo "SMOKE OK: ship $id created and read back as $staff_name; renames, sale, rebuild, validation and delete verified; Image uploaded to Garage, duplicate flagged, link read back, download address works and expires, key rights verified"
