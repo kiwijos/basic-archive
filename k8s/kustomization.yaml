@@ -3,9 +3,19 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - postgres.yaml
+  - garage.yaml
   - catalog-api.yaml
   - ingress.yaml
+configMapGenerator:
+  - name: garage-config
+    namespace: ship-archive
+    files:
+      - garage/garage.toml
+  - name: garage-init
+    namespace: ship-archive
+    files:
+      - garage/init.py
 # One version tag per slice; every custom image is pinned to it and never uses latest.
 images:
   - name: kiwijos/ship-archive-catalog-api
-    newTag: 0.2.0
+    newTag: 0.3.0

@@ -1,0 +1,133 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: garage
+  namespace: ship-archive
+spec:
+  selector:
+    app: garage
+  ports:
+    - name: s3
+      port: 3900
+    - name: admin
+      port: 3903
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: garage
+  namespace: ship-archive
+spec:
+  serviceName: garage
+  replicas: 1
+  selector:
+    matchLabels:
+      app: garage
+  template:
+    metadata:
+      labels:
+        app: garage
+    spec:
+      containers:
+        - name: garage
+          image: dxflrs/garage:v2.4.1
+          ports:
+            - name: s3
+              containerPort: 3900
+            - name: rpc
+              containerPort: 3901
+            - name: admin
+              containerPort: 3903
+          # Garage has no shell and answers its health check only once a layout exists,
+          # so readiness only asks that the S3 port is open; the init Job does the rest.
+          readinessProbe:
+            tcpSocket:
+              port: s3
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: admin
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/garage.toml
+              subPath: garage.toml
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/garage
+      volumes:
+        - name: config
+          configMap:
+            name: garage-config
+        - name: secrets
+          secret:
+            secretName: garage-secrets
+            defaultMode: 0400
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+# Safe to run again at any time: it only creates what is missing and re-sets permissions.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: garage-init
+  namespace: ship-archive
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: init
+          image: python:3.12.7-slim-bookworm
+          command: ["python", "/init/init.py"]
+          env:
+            - name: GARAGE_ADMIN_URL
+              value: http://garage:3903
+            - name: GARAGE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: admin-token
+            - name: CATALOG_API_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-api-s3
+                  key: S3_ACCESS_KEY_ID
+            - name: CATALOG_API_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-api-s3
+                  key: S3_SECRET_ACCESS_KEY
+            - name: CANTALOUPE_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: cantaloupe-s3
+                  key: S3_ACCESS_KEY_ID
+            - name: CANTALOUPE_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cantaloupe-s3
+                  key: S3_SECRET_ACCESS_KEY
+          volumeMounts:
+            - name: init
+              mountPath: /init
+      volumes:
+        - name: init
+          configMap:
+            name: garage-init

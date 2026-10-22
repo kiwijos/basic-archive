@@ -1,5 +1,10 @@
+import socket
+
+import boto3
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from moto.server import ThreadedMotoServer
 from sqlalchemy import create_engine, text
 
 from catalog_api.app import create_app
@@ -8,6 +13,8 @@ from catalog_api.settings import Settings
 
 TEST_DATABASE_URL = "postgresql+psycopg://postgres:test@localhost:55432/archive_test"
 STAFF_TOKENS = "alice=alice-token,bob=bob-token"
+MASTERS_BUCKET = "masters"
+S3_CREDENTIALS = {"aws_access_key_id": "test", "aws_secret_access_key": "test"}
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -44,14 +51,51 @@ def scratch_database_url(database):
         connection.execute(text("DROP DATABASE archive_scratch WITH (FORCE)"))
 
 
+@pytest.fixture(scope="session")
+def s3_url():
+    """A fake S3 server over real HTTP, standing in for Garage at its S3 boundary."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    server = ThreadedMotoServer(ip_address="127.0.0.1", port=port, verbose=False)
+    server.start()
+    yield f"http://127.0.0.1:{port}"
+    server.stop()
+
+
 @pytest.fixture
-def new_client():
+def s3(s3_url):
+    """A client for looking at what was stored, over an empty fake S3 with the masters bucket."""
+    httpx.post(f"{s3_url}/moto-api/reset").raise_for_status()
+    s3_client = boto3.client("s3", endpoint_url=s3_url, region_name="us-east-1", **S3_CREDENTIALS)
+    s3_client.create_bucket(Bucket=MASTERS_BUCKET)
+    return s3_client
+
+
+@pytest.fixture
+def make_settings(s3_url):
+    def make(**overrides) -> Settings:
+        values = {
+            "database_url": TEST_DATABASE_URL,
+            "staff_tokens": STAFF_TOKENS,
+            "s3_endpoint_url": s3_url,
+            "s3_access_key_id": S3_CREDENTIALS["aws_access_key_id"],
+            "s3_secret_access_key": S3_CREDENTIALS["aws_secret_access_key"],
+            "s3_region": "us-east-1",
+            "masters_bucket": MASTERS_BUCKET,
+        }
+        return Settings(**{**values, **overrides})
+
+    return make
+
+
+@pytest.fixture
+def new_client(make_settings, s3):
     """Start a new app instance each call, as a restarted pod would."""
     clients = []
 
-    def start() -> TestClient:
-        settings = Settings(database_url=TEST_DATABASE_URL, staff_tokens=STAFF_TOKENS)
-        test_client = TestClient(create_app(settings))
+    def start(**settings_overrides) -> TestClient:
+        test_client = TestClient(create_app(make_settings(**settings_overrides)))
         test_client.__enter__()
         clients.append(test_client)
         return test_client

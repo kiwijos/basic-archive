@@ -51,6 +51,51 @@ class Outbox(Base):
     payload: Mapped[dict] = mapped_column(JSONB)
 
 
+class Document(Base):
+    __tablename__ = "document"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    title: Mapped[str] = mapped_column(Text)
+    document_type: Mapped[str | None] = mapped_column(Text)
+    date_text: Mapped[str | None]
+    date_from: Mapped[date | None]
+    date_to: Mapped[date | None]
+    period: Mapped[UncertainDate | None] = composite(
+        UncertainDate, "date_text", "date_from", "date_to"
+    )
+    physical_location: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    deleted_at: Mapped[datetime | None]
+
+
+class DocumentSubject(Base):
+    __tablename__ = "document_subject"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("document.id"), primary_key=True)
+    subject_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("subject.id"), primary_key=True)
+    role: Mapped[str | None] = mapped_column(Text)
+
+
+class Image(Base):
+    __tablename__ = "image"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("document.id"))
+    page_no: Mapped[int]
+    bucket: Mapped[str] = mapped_column(Text)
+    object_key: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(Text)
+    mime: Mapped[str] = mapped_column(Text)
+    original_filename: Mapped[str | None] = mapped_column(Text)
+    review_status: Mapped[str] = mapped_column(Text)
+    rights: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    deleted_at: Mapped[datetime | None]
+
+
 class Organisation(Base):
     __tablename__ = "organisation"
 
