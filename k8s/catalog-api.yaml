@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog-api
+  namespace: ship-archive
+spec:
+  selector:
+    app: catalog-api
+  ports:
+    - port: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-api
+  namespace: ship-archive
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catalog-api
+  template:
+    metadata:
+      labels:
+        app: catalog-api
+    spec:
+      containers:
+        - name: catalog-api
+          image: kiwijos/ship-archive-catalog-api
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: catalog-api-secrets
+          # Ready only once the migration Job has brought the schema to the latest revision.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: catalog-api-migrate
+  namespace: ship-archive
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16.4-alpine
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -U postgres; do sleep 2; done"]
+      containers:
+        - name: migrate
+          image: kiwijos/ship-archive-catalog-api
+          command: ["python", "-m", "catalog_api.migrate"]
+          envFrom:
+            - secretRef:
+                name: catalog-api-secrets

@@ -70,5 +70,8 @@ dmypy.json
 .vscode/
 .idea/
 
-# GitHub/Copilot configuration
-.github/
+# CI workflows live here; a global gitignore may otherwise hide them
+!.github/
+
+# Lock files are committed so CI and image builds are reproducible
+!uv.lock
