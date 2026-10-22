@@ -24,7 +24,24 @@ def database():
 @pytest.fixture(autouse=True)
 def empty_database(database):
     with database.connect() as connection:
-        connection.execute(text("TRUNCATE subject, document, outbox CASCADE"))
+        tables = connection.execute(
+            text(
+                "SELECT string_agg(quote_ident(tablename), ', ') FROM pg_tables "
+                "WHERE schemaname = 'public' AND tablename <> 'alembic_version'"
+            )
+        ).scalar()
+        connection.execute(text(f"TRUNCATE {tables} CASCADE"))
+
+
+@pytest.fixture
+def scratch_database_url(database):
+    """An empty database of its own, for tests about the state of the schema."""
+    with database.connect() as connection:
+        connection.execute(text("DROP DATABASE IF EXISTS archive_scratch WITH (FORCE)"))
+        connection.execute(text("CREATE DATABASE archive_scratch"))
+    yield TEST_DATABASE_URL.rsplit("/", 1)[0] + "/archive_scratch"
+    with database.connect() as connection:
+        connection.execute(text("DROP DATABASE archive_scratch WITH (FORCE)"))
 
 
 @pytest.fixture

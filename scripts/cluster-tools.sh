@@ -14,7 +14,6 @@ helm upgrade --install traefik traefik/traefik \
   --version "$TRAEFIK_CHART_VERSION" \
   --namespace traefik --create-namespace \
   --set ingressClass.enabled=true \
-  --set ingressClass.isDefaultClass=true \
   --wait
 
 # kind's kubelets use self-signed certificates, so metrics-server must skip verifying them.

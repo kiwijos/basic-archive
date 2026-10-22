@@ -12,7 +12,7 @@ def staff_name(
 ) -> str:
     """Return the name of the staff member whose token was presented."""
     if credentials is not None:
-        for token, name in request.app.state.token_names.items():
+        for token, name in request.app.state.names_by_token.items():
             if hmac.compare_digest(token.encode(), credentials.credentials.encode()):
                 return name
     raise HTTPException(status_code=401, detail="A valid staff token is required")

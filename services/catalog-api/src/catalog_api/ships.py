@@ -52,10 +52,9 @@ def create_ship(
     return ShipOut(id=subject.id, name=ship.name, created_by=author)
 
 
-@router.get("/ships/{ship_id}")
+@router.get("/ships/{ship_id}", dependencies=[Depends(staff_name)])
 def read_ship(
     ship_id: uuid.UUID,
-    author: str = Depends(staff_name),
     session: Session = Depends(get_session),
 ) -> ShipOut:
     subject = session.scalars(
