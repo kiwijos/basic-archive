@@ -51,3 +51,58 @@ def test_a_ship_needs_a_name(client):
     )
 
     assert response.status_code == 422
+
+
+def test_a_tonnage_must_be_a_possible_value(client, staff):
+    for tonnage in (-1, 1e12):
+        response = client.post(
+            "/api/catalog/ships", json={"name": "Vega", "tonnage": tonnage}, headers=staff
+        )
+
+        assert response.status_code == 422, tonnage
+
+
+def test_a_ship_records_its_type_tonnage_and_fate_as_last_recorded(client, staff):
+    facts = {
+        "name": "Vega",
+        "ship_type": "barque",
+        "tonnage": 357.5,
+        "fate": "wrecked off Hanö",
+        "fate_date": {"date_text": "autumn 1913", "date_from": "1913-09-01", "date_to": "1913-11-30"},
+    }
+
+    created = client.post("/api/catalog/ships", json=facts, headers=staff).json()
+
+    read_back = client.get(f"/api/catalog/ships/{created['id']}", headers=staff).json()
+    assert read_back["ship_type"] == "barque"
+    assert read_back["tonnage"] == 357.5
+    assert read_back["fate"] == "wrecked off Hanö"
+    assert read_back["fate_date"]["date_text"] == "autumn 1913"
+
+
+def test_a_ships_facts_can_be_updated_without_touching_its_name(client, staff):
+    created = client.post(
+        "/api/catalog/ships", json={"name": "Vega", "tonnage": 300}, headers=staff
+    ).json()
+
+    updated = client.put(
+        f"/api/catalog/ships/{created['id']}",
+        json={"ship_type": "steamer", "tonnage": 410},
+        headers=staff,
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Vega"
+    assert updated.json()["ship_type"] == "steamer"
+    assert updated.json()["tonnage"] == 410
+    assert client.get(f"/api/catalog/ships/{created['id']}", headers=staff).json() == updated.json()
+
+
+def test_updating_an_unknown_ship_is_not_found(client, staff):
+    response = client.put(
+        "/api/catalog/ships/3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        json={"ship_type": "steamer"},
+        headers=staff,
+    )
+
+    assert response.status_code == 404

@@ -64,3 +64,23 @@ def new_client():
 @pytest.fixture
 def client(new_client):
     return new_client()
+
+
+@pytest.fixture
+def staff():
+    return {"Authorization": "Bearer alice-token"}
+
+
+@pytest.fixture
+def outbox(database):
+    """The change events waiting to be published, oldest first, as (entity, id, op)."""
+
+    def read() -> list[tuple[str, str, str]]:
+        with database.connect() as connection:
+            rows = connection.execute(
+                text("SELECT event_type, payload FROM outbox ORDER BY id")
+            ).all()
+        assert {row.event_type for row in rows} <= {"record.changed"}
+        return [(row.payload["entity"], row.payload["id"], row.payload["op"]) for row in rows]
+
+    return read

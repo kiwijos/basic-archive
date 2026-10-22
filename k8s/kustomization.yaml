@@ -8,4 +8,4 @@ resources:
 # One version tag per slice; every custom image is pinned to it and never uses latest.
 images:
   - name: kiwijos/ship-archive-catalog-api
-    newTag: 0.1.0
+    newTag: 0.2.0
