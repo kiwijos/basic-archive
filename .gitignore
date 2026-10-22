@@ -72,5 +72,3 @@ dmypy.json
 
 # GitHub/Copilot configuration
 .github/
-docs/agents/
-AGENTS.md
