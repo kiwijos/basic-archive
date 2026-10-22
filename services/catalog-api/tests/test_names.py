@@ -67,3 +67,42 @@ def test_names_require_a_staff_token(client, vega):
     response = client.post(f"/api/catalog/subjects/{vega}/names", json={"name": "Sofia"})
 
     assert response.status_code == 401
+
+
+def test_an_alias_neither_ends_nor_replaces_the_current_name(client, staff, vega):
+    alias = client.post(
+        f"/api/catalog/subjects/{vega}/names",
+        json={"name": "Wiking", "name_type": "alias", "date": {"date_from": "1900-01-01"}},
+        headers=staff,
+    )
+
+    assert alias.status_code == 201
+    assert client.get(f"/api/catalog/ships/{vega}", headers=staff).json()["name"] == "Vega"
+    history = client.get(f"/api/catalog/subjects/{vega}/names", headers=staff).json()
+    assert {n["name"]: n["date"]["date_to"] if n["date"] else None for n in history} == {
+        "Vega": None,
+        "Wiking": None,
+    }
+
+
+def test_an_undated_alias_is_accepted_alongside_an_existing_name(client, staff, vega):
+    alias = client.post(
+        f"/api/catalog/subjects/{vega}/names",
+        json={"name": "Wiking", "name_type": "alias"},
+        headers=staff,
+    )
+
+    assert alias.status_code == 201
+
+
+def test_a_name_whose_period_overlaps_another_name_is_rejected(client, staff, vega):
+    earlier = {"name": "Gustaf", "date": {"date_from": "1900-01-01", "date_to": "1910-01-01"}}
+    assert client.post(
+        f"/api/catalog/subjects/{vega}/names", json=earlier, headers=staff
+    ).status_code == 201
+
+    overlapping = rename(client, staff, vega, "Sofia", "1905-01-01")
+    adjacent = rename(client, staff, vega, "Sofia", "1910-01-01")
+
+    assert overlapping.status_code == 422
+    assert adjacent.status_code == 201

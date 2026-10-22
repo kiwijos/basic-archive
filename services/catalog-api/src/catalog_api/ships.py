@@ -2,7 +2,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,6 +12,7 @@ from catalog_api.db import get_session, soft_delete
 from catalog_api.events import record_changed
 from catalog_api.models import Ship, Subject, SubjectName
 from catalog_api.names import current_name
+from catalog_api.relations import announce_counterparts
 
 router = APIRouter(prefix="/api/catalog")
 
@@ -20,7 +21,7 @@ class ShipFacts(BaseModel):
     """What is recorded about a Ship, as last recorded."""
 
     ship_type: str | None = None
-    tonnage: float | None = None
+    tonnage: float | None = Field(default=None, ge=0, lt=100_000_000)
     launched: UncertainDate | None = None
     fate: str | None = None
     fate_date: UncertainDate | None = None
@@ -105,5 +106,6 @@ def update_ship(
 @router.delete("/ships/{ship_id}", status_code=204, dependencies=[Depends(staff_name)])
 def delete_ship(ship_id: uuid.UUID, session: Session = Depends(get_session)) -> None:
     subject, _ = find_ship(session, ship_id)
+    announce_counterparts(session, subject)
     soft_delete(subject)
     record_changed(session, subject, "delete")

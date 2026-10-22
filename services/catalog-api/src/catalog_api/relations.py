@@ -4,7 +4,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
 
 from catalog_api.auth import staff_name
@@ -64,9 +64,24 @@ def relation_out(session: Session, relation: Relation) -> RelationOut:
     )
 
 
+def live_relations(session: Session, subject_id: uuid.UUID | None = None) -> Select:
+    """Relations that are not deleted and whose two ends are not deleted, optionally of one Subject."""
+    live_subjects = select(Subject.id).where(Subject.deleted_at.is_(None))
+    query = select(Relation).where(
+        Relation.from_subject_id.in_(live_subjects),
+        Relation.to_subject_id.in_(live_subjects),
+        Relation.deleted_at.is_(None),
+    )
+    if subject_id is not None:
+        query = query.where(
+            or_(Relation.from_subject_id == subject_id, Relation.to_subject_id == subject_id)
+        )
+    return query
+
+
 def find_relation(session: Session, relation_id: uuid.UUID) -> Relation:
     relation = session.scalars(
-        select(Relation).where(Relation.id == relation_id, Relation.deleted_at.is_(None))
+        live_relations(session).where(Relation.id == relation_id)
     ).one_or_none()
     if relation is None:
         raise HTTPException(status_code=404, detail="Relation not found")
@@ -108,6 +123,13 @@ def announce(session: Session, relation: Relation) -> None:
         record_changed(session, session.get(Subject, subject_id))
 
 
+def announce_counterparts(session: Session, subject: Subject) -> None:
+    """Call before deleting a Subject: its Relations vanish from the records of the Subjects it was related to."""
+    for relation in session.scalars(live_relations(session, subject.id)):
+        other_id = relation.to_subject_id if relation.from_subject_id == subject.id else relation.from_subject_id
+        record_changed(session, session.get(Subject, other_id))
+
+
 @router.post("/relations", status_code=201)
 def create_relation(
     new: RelationIn,
@@ -146,13 +168,7 @@ def read_relations(
     session: Session = Depends(get_session),
 ) -> list[RelationOut]:
     find_subject(session, subject_id)
-    live = select(Subject.id).where(Subject.deleted_at.is_(None))
-    query = select(Relation).where(
-        or_(Relation.from_subject_id == subject_id, Relation.to_subject_id == subject_id),
-        Relation.from_subject_id.in_(live),
-        Relation.to_subject_id.in_(live),
-        Relation.deleted_at.is_(None),
-    )
+    query = live_relations(session, subject_id)
     if predicate:
         query = query.where(Relation.predicate == predicate)
     relations = sorted(

@@ -42,8 +42,8 @@ def names_of(session: Session, subject_id: uuid.UUID) -> list[SubjectName]:
 
 
 def current_name(session: Session, subject_id: uuid.UUID) -> str | None:
-    """The Name with no end date, or else the one that ended last."""
-    names = names_of(session, subject_id)
+    """The given Name with no end date, or else the one that ended last."""
+    names = [n for n in names_of(session, subject_id) if n.name_type == "given"]
     if not names:
         return None
     return max(names, key=lambda n: (n.date_to or date.max, n.date_from or date.min, n.created_at)).name
@@ -68,11 +68,15 @@ def name_out(name: SubjectName) -> NameOut:
     )
 
 
-def end_current_name(session: Session, subject_id: uuid.UUID, new_start: date | None) -> None:
+def end_current_name(
+    session: Session, subject_id: uuid.UUID, new_start: date | None
+) -> list[SubjectName]:
     """A new Name with no end replaces the open-ended one, which ends where the new one begins."""
-    previous = [n for n in names_of(session, subject_id) if n.date_to is None]
+    previous = [
+        n for n in names_of(session, subject_id) if n.name_type == "given" and n.date_to is None
+    ]
     if not previous:
-        return
+        return []
     if new_start is None:
         raise HTTPException(
             status_code=422,
@@ -85,6 +89,23 @@ def end_current_name(session: Session, subject_id: uuid.UUID, new_start: date | 
                 detail=f"The new Name cannot start before {old.name} began ({old.date_from})",
             )
         old.period = UncertainDate(old.date_text, old.date_from, new_start)
+    return previous
+
+
+def reject_overlap(
+    session: Session, subject_id: uuid.UUID, new: UncertainDate | None, replaced: list[SubjectName]
+) -> None:
+    """Refuse a Name whose period provably overlaps another Name; unknown starts prove nothing."""
+    if new is None or new.date_from is None:
+        return
+    for other in names_of(session, subject_id):
+        if other.name_type != "given" or other in replaced or other.date_from is None:
+            continue
+        if new.date_from < (other.date_to or date.max) and other.date_from < (new.date_to or date.max):
+            raise HTTPException(
+                status_code=422,
+                detail=f"The new Name overlaps {other.name} ({other.date_from} to {other.date_to})",
+            )
 
 
 @router.post("/subjects/{subject_id}/names", status_code=201)
@@ -96,8 +117,11 @@ def add_name(
 ) -> NameOut:
     subject = find_subject(session, subject_id)
     period = present(new.date)
-    if period is None or period.date_to is None:
-        end_current_name(session, subject_id, period.date_from if period else None)
+    if new.name_type == "given":
+        replaced = []
+        if period is None or period.date_to is None:
+            replaced = end_current_name(session, subject_id, period.date_from if period else None)
+        reject_overlap(session, subject_id, period, replaced)
     name = SubjectName(
         subject_id=subject_id,
         name=new.name,

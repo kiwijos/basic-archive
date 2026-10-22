@@ -62,6 +62,39 @@ def test_a_relation_change_is_announced_for_both_subjects(client, staff, outbox)
         )
 
 
+def test_deleting_a_ship_announces_the_subjects_it_was_related_to(client, staff, outbox):
+    ship = make_ship(client, staff)
+    yard = make_organisation(client, staff)
+    client.post(
+        f"{API}/relations",
+        json={"from_subject_id": ship, "predicate": "built_by", "to_subject_id": yard},
+        headers=staff,
+    )
+    written = len(outbox())
+
+    client.delete(f"{API}/ships/{ship}", headers=staff)
+
+    assert sorted(outbox()[written:]) == sorted(
+        [("ship", ship, "delete"), ("organisation", yard, "upsert")]
+    )
+
+
+def test_a_relation_of_a_deleted_ship_can_no_longer_be_changed(client, staff, outbox):
+    ship = make_ship(client, staff)
+    yard = make_organisation(client, staff)
+    relation = client.post(
+        f"{API}/relations",
+        json={"from_subject_id": ship, "predicate": "built_by", "to_subject_id": yard},
+        headers=staff,
+    ).json()["id"]
+    client.delete(f"{API}/ships/{ship}", headers=staff)
+    written = len(outbox())
+
+    assert client.put(f"{API}/relations/{relation}", json={}, headers=staff).status_code == 404
+    assert client.delete(f"{API}/relations/{relation}", headers=staff).status_code == 404
+    assert len(outbox()) == written
+
+
 def test_rejected_requests_write_no_event(client, staff, outbox):
     ship = make_ship(client, staff)
     written = len(outbox())

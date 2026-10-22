@@ -53,6 +53,15 @@ def test_a_ship_needs_a_name(client):
     assert response.status_code == 422
 
 
+def test_a_tonnage_must_be_a_possible_value(client, staff):
+    for tonnage in (-1, 1e12):
+        response = client.post(
+            "/api/catalog/ships", json={"name": "Vega", "tonnage": tonnage}, headers=staff
+        )
+
+        assert response.status_code == 422, tonnage
+
+
 def test_a_ship_records_its_type_tonnage_and_fate_as_last_recorded(client, staff):
     facts = {
         "name": "Vega",

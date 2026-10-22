@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# End-to-end check through the Ingress: create a Ship as Staff and read it back.
+# End-to-end check through the Ingress, as Staff: create and read back a Ship, rename it,
+# sell it, rebuild its hull, and check validation and delete.
 # Each slice extends this script, and a slice is accepted when it passes.
 set -euo pipefail
 

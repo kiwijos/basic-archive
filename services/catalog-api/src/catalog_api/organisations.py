@@ -11,6 +11,7 @@ from catalog_api.db import get_session, soft_delete
 from catalog_api.events import record_changed
 from catalog_api.models import Organisation, Subject, SubjectName
 from catalog_api.names import current_name
+from catalog_api.relations import announce_counterparts
 
 router = APIRouter(prefix="/api/catalog")
 
@@ -100,5 +101,6 @@ def delete_organisation(
     organisation_id: uuid.UUID, session: Session = Depends(get_session)
 ) -> None:
     subject, _ = find_organisation(session, organisation_id)
+    announce_counterparts(session, subject)
     soft_delete(subject)
     record_changed(session, subject, "delete")

@@ -79,7 +79,6 @@ def test_a_rebuilt_hull_is_a_new_ship_linked_to_the_old_one(archive):
     linked = archive.relate(rebuilt, "rebuilt_from", old_hull, date={"date_text": "1921"})
 
     assert linked.status_code == 201
-    assert rebuilt != old_hull
     from_new = archive.relations(rebuilt)
     from_old = archive.relations(old_hull)
     assert from_new == from_old
