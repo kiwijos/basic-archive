@@ -1,0 +1,3 @@
+# Subjects, dated names and dated relations model a ship's life
+
+Documents link to a generic `subject` (kinds `ship` and `organisation` for now) through `document_subject`, instead of the brief's single `document.ship_id`. Names live in `subject_name` and all links between subjects live in `relation`, each with an uncertain date (`date_text`, `date_from`, `date_to`), so renames, sales and rebuilds are rows rather than columns or arrays. A rename or sale keeps the same Ship; a hull rebuilt into a new vessel is a new Ship linked by `rebuilt_from`. An event log in the style of CIDOC-CRM was rejected because point-in-time questions then need derivation logic. People are not built yet (ADR 0002) but arrive as a new subject kind without a migration.
