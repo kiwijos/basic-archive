@@ -1,3 +1,4 @@
+import uuid
 from typing import Literal
 
 from sqlalchemy.orm import Session
@@ -5,7 +6,9 @@ from sqlalchemy.orm import Session
 from catalog_api.models import Document, Outbox, Subject
 
 
-def _enqueue(session: Session, entity: str, entity_id, op: Literal["upsert", "delete"]) -> None:
+def _enqueue(
+    session: Session, entity: str, entity_id: uuid.UUID, op: Literal["upsert", "delete"]
+) -> None:
     session.add(
         Outbox(
             event_type="record.changed",

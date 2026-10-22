@@ -19,7 +19,7 @@ make smoke           # exercises the API through the Ingress and the object stor
 
 The app is served on `http://localhost`. `make deploy` generates random Secrets on first run and adds any a newer slice needs; set `STAFF_NAMES="alice bob"` to choose the staff names the tokens belong to. Real Secrets are never committed, see `k8s/secrets.template.yaml` for their shape.
 
-An image rebuilt under a tag that is already deployed is not picked up by `make deploy`: run `kubectl -n ship-archive rollout restart deployment/catalog-api` after it.
+An image rebuilt under a tag that is already deployed is not picked up by `make deploy`, and the cluster node keeps its cached copy too. To use a local rebuild, remove the node's copy and restart: `docker exec desktop-control-plane crictl rmi docker.io/kiwijos/ship-archive-catalog-api:<tag>` then `kubectl -n ship-archive rollout restart deployment/catalog-api`.
 
 ## Tests
 

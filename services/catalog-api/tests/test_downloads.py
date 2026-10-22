@@ -1,7 +1,7 @@
 from urllib.parse import parse_qs, urlparse
 
 import httpx
-from test_uploads import API, PNG, upload
+from support import API, PNG, upload
 
 
 def first_image(client, staff, content=PNG):

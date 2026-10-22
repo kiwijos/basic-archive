@@ -12,6 +12,7 @@ from catalog_api.relations import router as relations_router
 from catalog_api.settings import Settings
 from catalog_api.ships import router as ships_router
 from catalog_api.storage import ObjectStorage, StorageUnavailable
+from catalog_api.upload_gate import UploadGate
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,11 @@ def create_app(settings: Settings) -> FastAPI:
 
     app.state.settings = settings
     app.state.storage = ObjectStorage(settings)
+    app.add_middleware(
+        UploadGate,
+        names_by_token=settings.names_by_token(),
+        max_upload_bytes=settings.max_upload_bytes,
+    )
     app.state.names_by_token = settings.names_by_token()
     app.state.engine = create_engine(settings.database_url, pool_pre_ping=True)
     app.include_router(health_router)

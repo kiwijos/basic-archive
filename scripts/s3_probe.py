@@ -1,4 +1,5 @@
-"""Shows what an S3 access key may do, by trying. Run inside the cluster: python - KEY SECRET < s3_probe.py"""
+"""Shows what an S3 access key may do, by trying. Run inside the cluster with the key id and the
+secret on two lines of stdin: python -c "$(cat s3_probe.py)" < keys"""
 
 import json
 import os
@@ -8,7 +9,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-key, secret = sys.argv[1:3]
+key, secret = (sys.stdin.readline().strip() for _ in range(2))
 s3 = boto3.client(
     "s3",
     endpoint_url=os.environ["S3_ENDPOINT_URL"],

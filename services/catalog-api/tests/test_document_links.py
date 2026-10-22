@@ -1,5 +1,5 @@
 import pytest
-from test_uploads import API, upload
+from support import API, upload
 
 
 @pytest.fixture

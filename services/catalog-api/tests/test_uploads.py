@@ -1,16 +1,9 @@
 import hashlib
 
-API = "/api/catalog"
-PNG = b"\x89PNG\r\n\x1a\n" + b"pretend this is a scanned letter"
+from support import API, PNG, stored_objects, upload
 
 
-def upload(client, staff, content=PNG, filename="scan.png", **fields):
-    data = {"title": "Letter from the yard", **fields}
-    files = {"file": (filename, content, "application/octet-stream")}
-    return client.post(f"{API}/documents", data=data, files=files, headers=staff)
-
-
-def test_uploading_a_scan_creates_one_document_with_one_image_stored_under_its_id(
+def test_uploading_an_image_creates_one_document_with_one_image_stored_under_its_id(
     client, staff, s3
 ):
     response = upload(
@@ -39,10 +32,6 @@ def test_uploading_a_scan_creates_one_document_with_one_image_stored_under_its_i
     assert image["review_status"] == "pending"
     stored = s3.get_object(Bucket="masters", Key=image["id"])["Body"].read()
     assert stored == PNG
-
-
-def stored_objects(s3):
-    return s3.list_objects_v2(Bucket="masters").get("KeyCount", 0)
 
 
 def test_the_real_type_is_read_from_the_bytes_not_the_file_name(client, staff):
@@ -132,3 +121,24 @@ def test_a_documents_uncertain_date_is_kept_as_written(client, staff):
         "date_to": "1891-12-31",
     }
     assert upload(client, staff).json()["date"] is None
+
+
+def test_blank_form_fields_are_treated_as_absent(client, staff):
+    # A browser form sends an empty string for every input the user left alone.
+    response = upload(
+        client,
+        staff,
+        document_type="",
+        date_text=" ",
+        date_from="",
+        date_to="",
+        physical_location="",
+        description="",
+    )
+
+    assert response.status_code == 201
+    document = response.json()
+    assert document["document_type"] is None
+    assert document["date"] is None
+    assert document["physical_location"] is None
+    assert document["description"] is None

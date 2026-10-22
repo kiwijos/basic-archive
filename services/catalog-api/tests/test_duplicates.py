@@ -1,4 +1,4 @@
-from test_uploads import API, PNG, stored_objects, upload
+from support import API, PNG, stored_objects, upload
 
 
 def test_a_second_upload_of_identical_bytes_is_flagged_as_a_duplicate(client, staff, s3):

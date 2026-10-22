@@ -96,7 +96,22 @@ spec:
         - name: init
           image: python:3.12.7-slim-bookworm
           command: ["python", "/init/init.py"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
           env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
             - name: GARAGE_ADMIN_URL
               value: http://garage:3903
             - name: GARAGE_ADMIN_TOKEN

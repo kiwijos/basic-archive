@@ -3,7 +3,7 @@ from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, BeforeValidator, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,15 @@ from catalog_api.uploads import FileTooLarge, fingerprint, sniff_mime
 router = APIRouter(prefix="/api/catalog")
 
 Rights = Literal["CC0", "PDM", "CC BY", "reserved"]
+
+
+def blank_to_none(value):
+    """A browser form sends an empty string for every input the user left alone."""
+    return None if isinstance(value, str) and not value.strip() else value
+
+
+FormText = Annotated[str | None, BeforeValidator(blank_to_none), Form()]
+FormDate = Annotated[date | None, BeforeValidator(blank_to_none), Form()]
 
 
 def get_settings(request: Request) -> Settings:
@@ -70,15 +79,15 @@ class UploadOut(DocumentOut):
 
 
 def image_out(image: Image) -> ImageOut:
-    return ImageOut(
-        id=image.id,
-        document_id=image.document_id,
-        page_no=image.page_no,
-        mime=image.mime,
-        sha256=image.sha256,
-        original_filename=image.original_filename,
-        rights=image.rights,
-        review_status=image.review_status,
+    return ImageOut.model_validate(image, from_attributes=True)
+
+
+def link_out(session: Session, subject: Subject, role: str | None) -> SubjectLinkOut:
+    return SubjectLinkOut(
+        subject_id=subject.id,
+        kind=subject.kind,
+        name=current_name(session, subject.id),
+        role=role,
     )
 
 
@@ -88,15 +97,7 @@ def links_of(session: Session, document_id: uuid.UUID) -> list[SubjectLinkOut]:
         .join(Subject, Subject.id == DocumentSubject.subject_id)
         .where(DocumentSubject.document_id == document_id, Subject.deleted_at.is_(None))
     ).all()
-    links = [
-        SubjectLinkOut(
-            subject_id=subject.id,
-            kind=subject.kind,
-            name=current_name(session, subject.id),
-            role=link.role,
-        )
-        for link, subject in rows
-    ]
+    links = [link_out(session, subject, link.role) for link, subject in rows]
     return sorted(links, key=lambda link: (link.kind, link.name or ""))
 
 
@@ -151,12 +152,7 @@ def link_subject(
     link.role = new.role
     session.flush()
     document_changed(session, document)
-    return SubjectLinkOut(
-        subject_id=subject.id,
-        kind=subject.kind,
-        name=current_name(session, subject.id),
-        role=link.role,
-    )
+    return link_out(session, subject, link.role)
 
 
 class DownloadAddress(BaseModel):
@@ -197,12 +193,12 @@ def download_url(
 def upload_document(
     file: UploadFile,
     title: Annotated[str, Form(max_length=500)],
-    document_type: Annotated[str | None, Form()] = None,
-    date_text: Annotated[str | None, Form()] = None,
-    date_from: Annotated[date | None, Form()] = None,
-    date_to: Annotated[date | None, Form()] = None,
-    physical_location: Annotated[str | None, Form()] = None,
-    description: Annotated[str | None, Form()] = None,
+    document_type: FormText = None,
+    date_text: FormText = None,
+    date_from: FormDate = None,
+    date_to: FormDate = None,
+    physical_location: FormText = None,
+    description: FormText = None,
     rights: Annotated[Rights, Form()] = "reserved",
     author: str = Depends(staff_name),
     session: Session = Depends(get_session),
