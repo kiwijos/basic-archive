@@ -3,14 +3,28 @@
 const WIKIDATA_ITEM = /^https:\/\/www\.wikidata\.org\/wiki\/Q[1-9][0-9]*$/;
 const MAX_QUERY = 200;
 
+/** An address from an outside service, or null unless it is an item page on Wikidata, so no page links anywhere else. */
+export function safeWikidataUrl(url) {
+  return typeof url === "string" && WIKIDATA_ITEM.test(url) ? url : null;
+}
+
+/** The day a stored match was fetched, or null when that is not known. */
+export function fetchedOn(reference) {
+  return reference?.retrieved_at ? reference.retrieved_at.slice(0, 10) : null;
+}
+
+/** The Wikidata matches among a record's outside references. */
+export function wikidataRefs(record) {
+  return (record?.external_refs ?? []).filter((reference) => reference.source === "wikidata");
+}
+
 /** One row per candidate: its words, whether this Ship already has it, and a link only if it points at Wikidata. */
 export function candidateRows(candidates, storedIds) {
   return candidates.map((candidate) => ({
     id: candidate.id,
     label: candidate.label,
     description: candidate.description || "No description on Wikidata",
-    // The address comes from an outside service, so it is used only when it is an item page on Wikidata.
-    url: WIKIDATA_ITEM.test(candidate.url ?? "") ? candidate.url : null,
+    url: safeWikidataUrl(candidate.url),
     chosen: storedIds.includes(candidate.id),
   }));
 }
@@ -23,7 +37,8 @@ export function candidatesSummary(count, query) {
 
 /** A stored match in one line. */
 export function referenceLine(reference) {
-  const when = reference.retrieved_at ? `, fetched ${reference.retrieved_at.slice(0, 10)}` : "";
+  const day = fetchedOn(reference);
+  const when = day ? `, fetched ${day}` : "";
   return `${reference.label} (Wikidata ${reference.id})${when}`;
 }
 

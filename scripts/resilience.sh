@@ -43,9 +43,17 @@ staff_call() { # staff_call METHOD PATH
 }
 
 restore() {
+  # Back to the real Wikidata whatever happened (a no-op when it was never changed), and wait for that
+  # rollout so the next script does not start while catalog-api is being replaced.
+  if kubectl -n "$NAMESPACE" get deployment catalog-api -o json | jq -e '.spec.template.spec.containers[0].env // [] | any(.name == "WIKIDATA_API_URL")' >/dev/null 2>&1; then
+    kubectl -n "$NAMESPACE" set env deployment/catalog-api WIKIDATA_API_URL- >/dev/null 2>&1 || true
+    kubectl -n "$NAMESPACE" rollout status deployment/catalog-api --timeout=180s >/dev/null 2>&1 || true
+  fi
+  # The ship made for the Wikidata scenario is removed even when a check failed.
+  if [ -n "${outage_ship:-}" ]; then
+    curl -s -o /dev/null -X DELETE -H @"$auth_header" "$BASE_URL/api/catalog/ships/$outage_ship" || true
+  fi
   rm -f "$auth_header"
-  # Back to the real Wikidata whatever happened (a no-op when it was never changed).
-  kubectl -n "$NAMESPACE" set env deployment/catalog-api WIKIDATA_API_URL- >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" scale statefulset/rabbitmq --replicas=1 >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" scale deployment/transcribe-worker --replicas=1 >/dev/null 2>&1 || true
 }
@@ -109,7 +117,8 @@ done
 echo "OK: $before documents are still searchable after the pod was deleted, with the same keys"
 
 echo "== D. Wikidata is unreachable"
-ship=$(api POST /ships "{\"name\":\"Outage $run\"}" | jq -r .id) || fail "creating a ship failed"
+outage_ship=$(api POST /ships "{\"name\":\"Outage $run\"}" | jq -r .id) || fail "creating a ship failed"
+ship=$outage_ship
 # Nothing listens on this address inside the pod, which is what an outage looks like from catalog-api.
 kubectl -n "$NAMESPACE" set env deployment/catalog-api WIKIDATA_API_URL=http://127.0.0.1:9/w/api.php >/dev/null
 settled catalog-api
@@ -132,4 +141,5 @@ after=$(staff_call GET "/ships/$ship")
 [ "$(echo "$after" | tail -1)" = 200 ] || fail "the ship cannot be read after the outage: $(echo "$after" | tr '\n' ' ' | cut -c1-200)"
 echo "$after" | sed '$d' | jq -e '.ship_type == "barque"' >/dev/null || fail "the edits made during the outage were lost"
 api DELETE "/ships/$ship" >/dev/null
+outage_ship=
 echo "OK: Wikidata being down gave a clear message within a bound, and nothing else stopped"

@@ -106,8 +106,11 @@ class WikidataClient:
                     return body
             logger.warning("Wikidata attempt %d of %d failed: %s", attempt, self._attempts, failure.message)
             pause = self._backoff * 2 ** (attempt - 1)
-            if attempt < self._attempts and deadline - time.monotonic() > pause:
-                time.sleep(pause)
+            if attempt == self._attempts:
+                break
+            if deadline - time.monotonic() <= pause:
+                break  # no time left to wait and try again, and trying at once would hammer a struggling service
+            time.sleep(pause)
         raise failure
 
     def _deadline(self) -> float:
@@ -127,10 +130,11 @@ class WikidataClient:
                 raise UNEXPECTED
             for item in items:
                 known = merged.get(item["id"])
-                label = item.get("label") or (known.label if known else item["id"])
-                description = (known.description if known and known.description else None) or item.get("description")
+                # Swedish is searched first and its wording wins; English only fills in what Swedish lacks.
                 if known is None:
-                    merged[item["id"]] = Candidate(item["id"], label, description)
+                    merged[item["id"]] = Candidate(item["id"], item.get("label") or item["id"], item.get("description"))
+                elif not known.description and item.get("description"):
+                    merged[item["id"]] = Candidate(known.id, known.label, item["description"])
         return list(merged.values())[:MAX_CANDIDATES]
 
     def entity(self, qid: str) -> Candidate | None:
@@ -143,11 +147,32 @@ class WikidataClient:
         if not isinstance(entities, dict):
             raise UNEXPECTED
         item = entities.get(qid)
-        if item is None or "missing" in item:
+        if item is None:
+            # A merged item is answered under the id it now has, with a note of where it came from.
+            item = next(
+                (e for e in entities.values() if isinstance(e, dict) and isinstance(e.get("redirects"), dict) and e["redirects"].get("from") == qid),
+                None,
+            )
+        if item is None:
             return None
-        labels, descriptions = item.get("labels", {}), item.get("descriptions", {})
-        if not isinstance(labels, dict) or not isinstance(descriptions, dict):
+        if not isinstance(item, dict):
             raise UNEXPECTED
-        label = next((labels[lang]["value"] for lang in LANGUAGES if lang in labels), qid)
-        description = next((descriptions[lang]["value"] for lang in LANGUAGES if lang in descriptions), None)
-        return Candidate(qid, label, description)
+        if "missing" in item:
+            return None
+        found = item.get("id")
+        labels, descriptions = item.get("labels", {}), item.get("descriptions", {})
+        if not (isinstance(found, str) and QID.match(found) and isinstance(labels, dict) and isinstance(descriptions, dict)):
+            raise UNEXPECTED
+        return Candidate(found, self._wording(labels) or found, self._wording(descriptions))
+
+    @staticmethod
+    def _wording(values: dict) -> str | None:
+        """The text in the first language wanted that has any, or None; anything not shaped like Wikidata's is refused."""
+        for language in LANGUAGES:
+            entry = values.get(language)
+            if entry is None:
+                continue
+            if not (isinstance(entry, dict) and isinstance(entry.get("value"), str)):
+                raise UNEXPECTED
+            return entry["value"]
+        return None

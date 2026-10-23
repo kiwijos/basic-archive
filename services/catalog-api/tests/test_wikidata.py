@@ -318,3 +318,133 @@ def test_removing_what_is_not_stored_says_so_and_only_staff_may_remove(client, s
     assert client.delete(f"{API}/ships/{ship}/wikidata/not-an-id", headers=staff).status_code == 422
     assert [r["id"] for r in refs(client, staff, ship)] == ["Q777"]
     assert len(outbox()) == before
+
+
+# ---- found in review ------------------------------------------------------------------------------------------------
+
+
+def test_there_must_be_a_name_to_look_for_and_wikidata_is_not_asked_without_one(client, staff, known):
+    ship = make_ship(client, staff, "Vasa")
+    [only_name] = client.get(f"{API}/subjects/{ship}/names", headers=staff).json()
+    client.delete(f"{API}/names/{only_name['id']}", headers=staff)
+
+    nameless = candidates(client, staff, ship)
+    blank = candidates(client, staff, make_ship(client, staff, "Freja"), q="   ")
+
+    assert nameless.status_code == 422 and "no name" in nameless.json()["detail"].lower()
+    assert blank.status_code == 422 and "type a name" in blank.json()["detail"].lower()
+    assert known.asked("wbsearchentities") == []
+    # Typing a name works even for a ship that has none.
+    assert candidates(client, staff, ship, q="Wasa").status_code == 200
+
+
+def test_a_hit_missing_a_description_in_one_language_gets_it_from_the_other_and_the_list_is_capped(client, staff, known):
+    ship = make_ship(client, staff, "Wasa")
+    for n in range(14):
+        known.add(f"Q{5000 + n}", en=(f"Wasa {n}", f"description {n}"))
+
+    ferry = candidates(client, staff, ship, q="Wasa").json()["candidates"]
+
+    assert len(ferry) == 10
+    assert next(c for c in ferry if c["id"] == "Q777")["description"] == "Swedish ferry"  # Swedish had none, English did
+    assert len({c["id"] for c in ferry}) == 10
+
+
+def test_a_label_wikidata_lacks_in_both_languages_falls_back_to_the_identifier(client, staff, wikidata):
+    wikidata.add("Q4242", en=None, sv=None)
+    wikidata.entities["Q4242"] = {"de": ("Nur Deutsch", "kein Schwedisch")}
+    ship = make_ship(client, staff, "Nur Deutsch")
+
+    chosen = choose(client, staff, ship, "Q4242")
+
+    assert chosen.status_code == 200
+    assert chosen.json()["label"] == "Q4242" and chosen.json()["description"] is None
+
+
+def test_an_item_that_was_merged_into_another_is_stored_under_the_one_wikidata_now_uses(client, staff, known):
+    known.redirect("Q5", VASA)
+    ship = make_ship(client, staff)
+
+    chosen = choose(client, staff, ship, "Q5")
+
+    assert chosen.status_code == 200
+    assert chosen.json()["id"] == VASA and chosen.json()["url"].endswith(VASA)
+    assert [r["id"] for r in refs(client, staff, ship)] == [VASA]
+
+
+def test_an_item_with_a_shape_wikidata_does_not_send_is_an_unexpected_answer_not_a_crash(client, staff, known):
+    ship = make_ship(client, staff)
+    odd = [
+        {"entities": {VASA: "just a string"}},
+        {"entities": {VASA: {"id": VASA, "labels": {"sv": "not an object"}}}},
+        {"entities": {VASA: {"id": VASA, "labels": {"sv": {"value": 42}}}}},
+        {"entities": {VASA: {"id": VASA, "labels": [], "descriptions": "x"}}},
+        {"entities": []},
+    ]
+
+    for body in odd:
+        known.script("wbgetentities", {"json": body})
+        answer = choose(client, staff, ship)
+        assert answer.status_code == 502, body
+        assert "unexpected" in answer.json()["detail"].lower()
+    assert refs(client, staff, ship) == []
+
+
+@pytest.mark.parametrize("action", ["candidates", "choose"])
+def test_no_database_connection_is_held_while_waiting_for_wikidata(new_client, staff, known, action):
+    import threading
+    import time
+
+    client = new_client(wikidata_timeout_seconds=2.0)
+    ship = make_ship(client, staff)
+    ask = {"candidates": lambda: candidates(client, staff, ship), "choose": lambda: choose(client, staff, ship)}[action]
+    known.script({"candidates": "wbsearchentities", "choose": "wbgetentities"}[action], {"delay": 0.8})
+    holder = threading.Thread(target=ask)
+    holder.start()
+    time.sleep(0.4)
+
+    checked_out = client.app.state.engine.pool.checkedout()
+    holder.join()
+
+    assert checked_out == 0, "a slow Wikidata would tie up the pool the rest of the archive uses"
+
+
+def test_two_choices_made_at_the_same_moment_are_both_kept(client, staff, known):
+    from concurrent.futures import ThreadPoolExecutor
+
+    ship = make_ship(client, staff)
+    known.script("wbgetentities", {"delay": 0.3}, {"delay": 0.3})
+
+    with ThreadPoolExecutor(2) as pool:
+        results = list(pool.map(lambda qid: choose(client, staff, ship, qid).status_code, [VASA, "Q777"]))
+
+    assert results == [200, 200]
+    assert sorted(r["id"] for r in refs(client, staff, ship)) == sorted([VASA, "Q777"])
+
+
+def test_a_failed_try_does_not_fire_the_next_one_at_once_when_there_is_no_time_left_to_wait(new_client, staff, known):
+    client = new_client(wikidata_attempts=5, wikidata_backoff_seconds=1.0, wikidata_budget_seconds=0.5)
+    ship = make_ship(client, staff)
+    known.script("wbsearchentities", *[{"status": 503}] * 5)
+
+    import time
+
+    started = time.monotonic()
+    answer = candidates(client, staff, ship)
+    took = time.monotonic() - started
+
+    assert answer.status_code == 502
+    assert len(known.asked("wbsearchentities")) == 1, "hammering a service that just said it is struggling"
+    assert took < 0.4, f"slept {took:.2f} s past a 0.5 s budget"
+
+
+def test_a_deleted_ship_and_an_organisation_are_not_ships_for_wikidata(client, staff, known):
+    ship = make_ship(client, staff)
+    organisation = client.post(f"{API}/organisations", json={"name": "Götaverken"}, headers=staff).json()["id"]
+    client.delete(f"{API}/ships/{ship}", headers=staff)
+
+    for subject in (ship, organisation):
+        assert candidates(client, staff, subject).status_code == 404
+        assert choose(client, staff, subject).status_code == 404
+        assert client.delete(f"{API}/ships/{subject}/wikidata/{VASA}", headers=staff).status_code == 404
+    assert known.asked("wbgetentities") == []

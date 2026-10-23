@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlparse
 class FakeWikidata:
     def __init__(self):
         self.entities: dict[str, dict] = {}
+        self.redirects: dict[str, str] = {}
         self.requests: list[dict] = []
         self._script: dict[str, list[dict]] = {}
         self._lock = threading.Lock()
@@ -59,12 +60,17 @@ class FakeWikidata:
     def reset(self):
         with self._lock:
             self.entities.clear()
+            self.redirects.clear()
             self.requests.clear()
             self._script.clear()
 
     def add(self, qid: str, *, en: tuple[str, str] | None = None, sv: tuple[str, str] | None = None) -> None:
         """An entity with a (label, description) per language."""
         self.entities[qid] = {"en": en, "sv": sv}
+
+    def redirect(self, old: str, new: str) -> None:
+        """An item that was merged into another: asking for the old id answers with the new item."""
+        self.redirects[old] = new
 
     def script(self, action: str, *steps: dict) -> None:
         """The next answers to an action, one per request, before it goes back to answering normally.
@@ -95,13 +101,15 @@ class FakeWikidata:
         if action == "wbgetentities":
             wanted = params.get("ids", "").split("|")
             out = {}
-            for qid in wanted:
+            for asked in wanted:
+                qid = self.redirects.get(asked, asked)
                 languages = self.entities.get(qid)
                 if languages is None:
                     out[qid] = {"id": qid, "missing": ""}
                     continue
                 out[qid] = {
                     "id": qid, "type": "item",
+                    **({"redirects": {"from": asked, "to": qid}} if qid != asked else {}),
                     "labels": {lang: {"language": lang, "value": pair[0]} for lang, pair in languages.items() if pair},
                     "descriptions": {lang: {"language": lang, "value": pair[1]} for lang, pair in languages.items() if pair and pair[1]},
                 }

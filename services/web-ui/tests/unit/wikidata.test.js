@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { candidateRows, candidatesSummary, referenceLine, validQuery } from "../../src/wikidata.js";
+import { candidateRows, candidatesSummary, fetchedOn, referenceLine, safeWikidataUrl, validQuery, wikidataRefs } from "../../src/wikidata.js";
 
 const candidate = (id, extra = {}) => ({ id, label: `Label ${id}`, description: `About ${id}`, url: `https://www.wikidata.org/wiki/${id}`, ...extra });
 
@@ -42,4 +42,25 @@ test("what is typed in the search box must be something to ask for", () => {
   assert.equal(validQuery("   "), null);
   assert.equal(validQuery(""), null);
   assert.equal(validQuery("x".repeat(201)), "x".repeat(200));
+});
+
+test("a link to Wikidata is used only when it really is an item page on Wikidata, wherever it is shown", () => {
+  assert.equal(safeWikidataUrl("https://www.wikidata.org/wiki/Q219821"), "https://www.wikidata.org/wiki/Q219821");
+  for (const bad of ["javascript:alert(1)", "https://www.wikidata.org.evil.example/wiki/Q1", "http://www.wikidata.org/wiki/Q1", "https://www.wikidata.org/wiki/Q1?x=1", "https://www.wikidata.org/wiki/P31", "", null, undefined]) {
+    assert.equal(safeWikidataUrl(bad), null, String(bad));
+  }
+});
+
+test("the day a match was fetched is shown when known and left out when not", () => {
+  assert.equal(fetchedOn({ retrieved_at: "2026-10-23T21:04:05+00:00" }), "2026-10-23");
+  assert.equal(fetchedOn({ retrieved_at: null }), null);
+  assert.equal(fetchedOn({}), null);
+});
+
+test("only the Wikidata matches of a record are picked out of its outside references", () => {
+  const ship = { external_refs: [{ source: "wikidata", id: "Q1" }, { source: "other", id: "X" }, { source: "wikidata", id: "Q2" }] };
+
+  assert.deepEqual(wikidataRefs(ship).map((ref) => ref.id), ["Q1", "Q2"]);
+  assert.deepEqual(wikidataRefs({}), []);
+  assert.deepEqual(wikidataRefs(null), []);
 });

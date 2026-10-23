@@ -11,7 +11,7 @@ from catalog_api.names import router as names_router
 from catalog_api.organisations import router as organisations_router
 from catalog_api.relations import router as relations_router
 from catalog_api.relay import OutboxRelay
-from catalog_api.enrichment import router as enrichment_router
+from catalog_api.wikidata_matches import router as wikidata_matches_router
 from catalog_api.indexing import router as indexing_router
 from catalog_api.review import router as review_router
 from catalog_api.settings import Settings
@@ -69,12 +69,12 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.staff_names_by_token = settings.staff_names_by_token()
     app.state.service_names_by_token = settings.service_names_by_token()
     app.state.wikidata = WikidataClient(
-        settings.wikidata_api_url,
-        settings.wikidata_user_agent,
-        settings.wikidata_timeout_seconds,
-        settings.wikidata_attempts,
-        settings.wikidata_backoff_seconds,
-        settings.wikidata_budget_seconds,
+        api_url=settings.wikidata_api_url,
+        user_agent=settings.wikidata_user_agent,
+        timeout=settings.wikidata_timeout_seconds,
+        attempts=settings.wikidata_attempts,
+        backoff=settings.wikidata_backoff_seconds,
+        budget=settings.wikidata_budget_seconds,
     )
     app.state.engine = create_engine(settings.database_url, pool_pre_ping=True)
     app.include_router(health_router)
@@ -86,5 +86,5 @@ def create_app(settings: Settings) -> FastAPI:
     app.include_router(transcriptions_router)
     app.include_router(review_router)
     app.include_router(indexing_router)
-    app.include_router(enrichment_router)
+    app.include_router(wikidata_matches_router)
     return app

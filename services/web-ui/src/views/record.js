@@ -2,6 +2,7 @@ import { h } from "../dom.js";
 import { pathFor, pathForRecord } from "../router.js";
 import { readContext } from "../record-context.js";
 import { imageVerification, matchedNameOnPage, nameTimeline, periodText, relationSentence, rightsInfo, verification, yearsText } from "../view-models.js";
+import { fetchedOn, safeWikidataUrl } from "../wikidata.js";
 import { link, verificationBadge } from "../widgets.js";
 import { scanViewer } from "./scan-viewer.js";
 
@@ -108,9 +109,9 @@ function subjectPage({ record, navigate, kind, matchedName, staff }) {
             h(
               "li",
               { "data-source": ref.source },
-              h("a", { href: ref.url, rel: "noopener noreferrer" }, `${ref.label} on Wikidata`),
+              safeWikidataUrl(ref.url) ? h("a", { href: ref.url, rel: "noopener noreferrer" }, `${ref.label} on Wikidata`) : `${ref.label} on Wikidata`,
               ref.description ? ` – ${ref.description}` : "",
-              h("small", { class: "muted" }, ` (matched by staff, fetched ${ref.retrieved_at.slice(0, 10)})`),
+              h("small", { class: "muted" }, ` (matched by staff${fetchedOn(ref) ? `, fetched ${fetchedOn(ref)}` : ""})`),
             ),
           )),
         )

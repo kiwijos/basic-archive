@@ -1,6 +1,6 @@
 import { h } from "../dom.js";
 import { pathFor } from "../router.js";
-import { candidateRows, candidatesSummary, referenceLine, validQuery } from "../wikidata.js";
+import { candidateRows, candidatesSummary, referenceLine, safeWikidataUrl, validQuery, wikidataRefs } from "../wikidata.js";
 import { link } from "../widgets.js";
 
 /**
@@ -23,34 +23,40 @@ export function shipEditView({ api, navigate, id }) {
   const input = h("input", { id: "wikidata-query", name: "q", type: "search", maxlength: 200, autocomplete: "off" });
   const submit = h("button", { type: "submit", class: "primary" }, "Find on Wikidata");
 
-  const storedIds = () => (ship?.external_refs ?? []).filter((ref) => ref.source === "wikidata").map((ref) => ref.id);
+  const storedIds = () => wikidataRefs(ship).map((ref) => ref.id);
+
+  /** Runs one change a person asked for from a button: it is disabled meanwhile, and a failure is shown and the button given back. */
+  async function act(button, work) {
+    problem.textContent = "";
+    button.disabled = true;
+    try {
+      await work();
+    } catch (error) {
+      problem.textContent = error.message;
+      button.disabled = false;
+    }
+  }
 
   function paintStored() {
-    const refs = (ship?.external_refs ?? []).filter((ref) => ref.source === "wikidata");
+    const refs = wikidataRefs(ship);
     storedHeading.textContent = refs.length ? "Matches on Wikidata" : "No Wikidata match chosen yet";
     stored.replaceChildren(
       ...refs.map((ref) =>
         h(
           "li",
           { "data-wikidata-id": ref.id },
-          h("a", { href: ref.url, rel: "noopener noreferrer", target: "_blank" }, referenceLine(ref)),
+          safeWikidataUrl(ref.url) ? h("a", { href: ref.url, rel: "noopener noreferrer", target: "_blank" }, referenceLine(ref)) : referenceLine(ref),
           ref.description ? ` – ${ref.description} ` : " ",
           h(
             "button",
             {
               type: "button",
-              onclick: async (event) => {
-                problem.textContent = "";
-                event.target.disabled = true;
-                try {
+              onclick: (event) =>
+                act(event.target, async () => {
                   await api.removeWikidata(id, ref.id);
                   notice.textContent = `Removed ${ref.label} (${ref.id}).`;
                   await reload();
-                } catch (error) {
-                  problem.textContent = error.message;
-                  event.target.disabled = false;
-                }
-              },
+                }),
             },
             `Remove ${ref.label}`,
           ),
@@ -81,19 +87,13 @@ export function shipEditView({ api, navigate, id }) {
                   type: "button",
                   class: "primary",
                   "aria-label": `Choose ${row.label} (${row.id}) for this ship`,
-                  onclick: async (event) => {
-                    problem.textContent = "";
-                    event.target.disabled = true;
-                    try {
+                  onclick: (event) =>
+                    act(event.target, async () => {
                       await api.chooseWikidata(id, row.id);
                       notice.textContent = `Stored ${row.label} (${row.id}) from Wikidata.`;
                       await reload();
                       paintCandidates(found, query);
-                    } catch (error) {
-                      problem.textContent = error.message;
-                      event.target.disabled = false;
-                    }
-                  },
+                    }),
                 },
                 "Choose",
               ),
