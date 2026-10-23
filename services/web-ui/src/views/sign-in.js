@@ -1,8 +1,8 @@
 import { h } from "../dom.js";
 
 /** Asks for the staff token and checks it with the API before letting anyone in. */
-export function signInView({ api, session, onSignedIn }) {
-  const problem = h("p", { class: "error", role: "alert" });
+export function signInView({ api, session, onSignedIn, notice }) {
+  const problem = h("p", { class: "error", role: "alert" }, notice ?? "");
   const input = h("input", {
     id: "token",
     name: "token",

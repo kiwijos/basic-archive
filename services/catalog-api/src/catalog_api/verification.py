@@ -24,14 +24,15 @@ def readings_of(session: Session, image_ids: list[uuid.UUID]) -> dict[uuid.UUID,
     """The Reading of each Image, from one query."""
     latest_human: dict[uuid.UUID, str] = {}
     latest_machine: dict[uuid.UUID, str] = {}
+    # Only the newest row per Image and source: corrections are kept for good, and their text can be long.
     rows = session.scalars(
         select(Transcription)
         .where(Transcription.image_id.in_(image_ids))
-        .order_by(Transcription.created_at.desc())
+        .distinct(Transcription.image_id, Transcription.source)
+        .order_by(Transcription.image_id, Transcription.source, Transcription.created_at.desc())
     )
     for row in rows:
-        newest = latest_human if row.source == "human" else latest_machine
-        newest.setdefault(row.image_id, row.text)  # rows are newest first, so the first one seen wins
+        (latest_human if row.source == "human" else latest_machine)[row.image_id] = row.text
     readings = {}
     for image_id in image_ids:
         if image_id in latest_human:

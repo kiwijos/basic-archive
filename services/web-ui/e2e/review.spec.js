@@ -86,6 +86,21 @@ test("upload, wait for the text, correct it, and the document leaves the queue",
   await expect(page.getByLabel("Text on the page")).toHaveValue(corrected);
 });
 
+test("a token refused mid-session returns to sign-in with a message, then back to the same page", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Review queue", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Review queue" })).toBeVisible();
+
+  await page.evaluate(() => sessionStorage.setItem("archive.token", "revoked-token"));
+  await page.reload();
+
+  await expect(page.getByRole("alert")).toContainText("token was not accepted");
+  await page.getByLabel("Staff token").fill(token);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/\/review$/);
+  await expect(page.getByRole("heading", { name: "Review queue" })).toBeVisible();
+});
+
 test("an unknown address shows a page-not-found message after sign-in", async ({ page }) => {
   await signIn(page);
   await page.goto("/no/such/page");

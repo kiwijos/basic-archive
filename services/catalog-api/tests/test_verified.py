@@ -118,3 +118,72 @@ def test_an_upload_answer_already_carries_the_document_state(client, staff):
 
     assert (answer["verified"], answer["verified_images"], answer["image_count"]) == (False, 0, 1)
     assert answer["images"][0]["verified"] is False
+
+
+def soft_delete(database, table, record_id):
+    from sqlalchemy import text
+
+    with database.begin() as connection:
+        connection.execute(text(f"UPDATE {table} SET deleted_at = now() WHERE id = :id"), {"id": record_id})
+
+
+def test_a_soft_deleted_image_is_not_counted_and_cannot_be_corrected(client, staff, database):
+    document = upload(client, staff).json()
+    kept = document["images"][0]["id"]
+    removed = add_page(client, staff, document["id"], JPEG).json()["images"][1]["id"]
+    soft_delete(database, "image", removed)
+
+    read = client.get(f"{API}/documents/{document['id']}", headers=staff).json()
+
+    assert (read["image_count"], read["verified_images"], read["verified"]) == (1, 0, False)
+    assert correct(client, staff, removed, "x").status_code == 404
+    assert correct(client, staff, kept, "x").status_code == 201
+    assert client.get(f"{API}/documents/{document['id']}", headers=staff).json()["verified"] is True
+
+
+def test_a_document_with_no_live_images_is_neither_verified_nor_waiting(client, staff, database):
+    document = upload(client, staff).json()
+    soft_delete(database, "image", document["images"][0]["id"])
+
+    read = client.get(f"{API}/documents/{document['id']}", headers=staff).json()
+
+    assert (read["image_count"], read["verified"]) == (0, False)
+    assert client.get(f"{API}/review-queue", headers=staff).json() == []
+
+
+def test_a_soft_deleted_document_is_not_in_the_queue(client, staff, database):
+    document = upload(client, staff).json()
+    soft_delete(database, "document", document["id"])
+
+    assert client.get(f"{API}/review-queue", headers=staff).json() == []
+
+
+def test_the_text_limit_is_enforced_at_the_boundary_for_corrections_and_machine_results(client, staff, image):
+    from catalog_api.transcriptions import MAX_TEXT_CHARACTERS
+
+    assert correct(client, staff, image, "a" * MAX_TEXT_CHARACTERS).status_code == 201
+    assert correct(client, staff, image, "a" * (MAX_TEXT_CHARACTERS + 1)).status_code == 422
+    other = upload(client, staff, title="Other").json()["images"][0]["id"]
+    assert read_by_machine(client, other, "a" * (MAX_TEXT_CHARACTERS + 1)).status_code == 422
+
+
+def test_a_correction_is_stamped_when_it_is_written_not_when_its_transaction_began(client, staff, image, database):
+    import threading
+    import time
+
+    from sqlalchemy import text
+
+    # Hold the Image's row so a correction starts, then waits. now() would stamp it with the time it
+    # started; the stamp must be the time it was written, or overlapping saves can be ordered wrongly.
+    with database.connect() as connection:  # this engine autocommits, so the transaction is explicit
+        connection.execute(text("BEGIN"))
+        connection.execute(text("SELECT 1 FROM image WHERE id = :id FOR UPDATE"), {"id": image})
+        saver = threading.Thread(target=lambda: correct(client, staff, image, "waited"))
+        saver.start()
+        time.sleep(1.5)
+        released = connection.execute(text("SELECT clock_timestamp()")).scalar()
+        connection.execute(text("COMMIT"))
+        saver.join(timeout=30)
+        stamped = connection.execute(text("SELECT created_at FROM transcription WHERE text = 'waited'")).scalar()
+
+    assert stamped >= released

@@ -13,6 +13,7 @@
   background: var(--paper);
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; line-height: 1.5; }
 main { max-width: 72rem; margin: 0 auto; padding: 1rem 1.25rem 3rem; outline: none; }
 .narrow { max-width: 34rem; }

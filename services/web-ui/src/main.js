@@ -26,9 +26,9 @@ function signOut() {
 const api = createApi({
   fetch: (...args) => fetch(...args),
   getToken: () => session.token(),
-  onUnauthorized: () => {
-    session.signOut();
-    navigate(pathFor("home"));
+  onUnauthorized: (message) => {
+    session.expire(message, location.pathname + location.search);
+    render();
   },
 });
 
@@ -74,7 +74,16 @@ function render() {
 
   let view;
   if (!session.token() && route.name !== "notFound") {
-    view = signInView({ api, session, onSignedIn: () => render() });
+    view = signInView({
+      api,
+      session,
+      notice: session.takeNotice(),
+      onSignedIn: () => {
+        const back = session.takeReturnTo();
+        if (back && parseRoute(back).name !== "notFound") navigate(back, { replace: true });
+        else render();
+      },
+    });
   } else if (route.name === "home") view = homeView();
   else if (route.name === "queue") view = queueView({ api, navigate });
   else if (route.name === "upload") view = uploadView({ api, navigate });

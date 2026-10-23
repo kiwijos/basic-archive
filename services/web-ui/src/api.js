@@ -40,8 +40,9 @@ export function createApi({ fetch, getToken, onUnauthorized, base = "" }) {
     }
     if (!response.ok) {
       const parsed = await response.json().catch(() => undefined);
-      if (response.status === 401 && signOutOn401) onUnauthorized();
-      throw new ApiError(response.status, describeFailure(response.status, parsed));
+      const message = describeFailure(response.status, parsed);
+      if (response.status === 401 && signOutOn401) onUnauthorized(message);
+      throw new ApiError(response.status, message);
     }
     return as === "blob" ? response.blob() : response.json();
   }

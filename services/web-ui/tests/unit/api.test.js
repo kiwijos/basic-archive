@@ -23,7 +23,7 @@ function fakeNetwork(...answers) {
 
 function clientFor(network, { token = "secret-token" } = {}) {
   const signedOut = [];
-  const api = createApi({ fetch: network.fetch, getToken: () => token, onUnauthorized: () => signedOut.push(true) });
+  const api = createApi({ fetch: network.fetch, getToken: () => token, onUnauthorized: (message) => signedOut.push(message) });
   return { api, signedOut };
 }
 
@@ -72,6 +72,7 @@ test("a refused token signs the person out, and says so", async () => {
     return true;
   });
   assert.equal(signedOut.length, 1);
+  assert.match(signedOut[0], /token was not accepted/);
 });
 
 test("checking a token at sign-in reports the refusal without signing out of anything", async () => {

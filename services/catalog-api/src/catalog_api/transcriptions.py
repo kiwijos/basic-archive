@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, StringConstraints
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from catalog_api.auth import Caller, any_caller, service_name, staff_name
@@ -109,14 +109,21 @@ def add_transcription(
             language=body.language,
             confidence=body.confidence,
             created_by=caller.name,
+            created_at=func.clock_timestamp(),
         )
     else:
         # A person's text settles the Image whatever state it was in: even one the OCR has not
         # reached yet, or failed on. A machine result arriving later is then refused.
         move_image(session, image_id, ("pending", "ocr_done", "failed", "verified"), "verified")
         transcription = Transcription(
-            image_id=image_id, source="human", text=body.text, language=body.language, created_by=caller.name
+            image_id=image_id,
+            source="human",
+            text=body.text,
+            language=body.language,
+            created_by=caller.name,
+            created_at=func.clock_timestamp(),
         )
+    # Stamped when written: now() is the start of the transaction, which can be earlier than a save that committed first.
     session.add(transcription)
     session.flush()
     session.refresh(transcription)
