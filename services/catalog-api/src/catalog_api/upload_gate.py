@@ -1,10 +1,13 @@
+import re
+
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from catalog_api.auth import name_for_token
 
-UPLOAD_PATH = "/api/catalog/documents"
+# The routes that take a file: a new Document, and another page for an existing one.
+UPLOAD_PATHS = re.compile(r"^/api/catalog/documents(/[0-9a-fA-F-]{36}/images)?$")
 
 # Room for the form fields and multipart framing around the file itself.
 MULTIPART_OVERHEAD_BYTES = 1024 * 1024
@@ -23,7 +26,7 @@ class UploadGate:
         self.max_upload_bytes = max_upload_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and scope["method"] == "POST" and scope["path"] == UPLOAD_PATH:
+        if scope["type"] == "http" and scope["method"] == "POST" and UPLOAD_PATHS.match(scope["path"]):
             refusal = self.refusal(Headers(scope=scope))
             if refusal is not None:
                 await refusal(scope, receive, send)

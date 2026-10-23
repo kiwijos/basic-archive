@@ -75,3 +75,8 @@ dmypy.json
 
 # Lock files are committed so CI and image builds are reproducible
 !uv.lock
+
+# Web UI
+node_modules/
+test-results/
+playwright-report/

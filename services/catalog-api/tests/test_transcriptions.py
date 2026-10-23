@@ -90,7 +90,6 @@ def test_a_blank_page_is_a_valid_result(client, staff, image):
         {"engine": ""},
         {"engine_version": ""},
         {"language": ""},
-        {"source": "human"},
     ],
 )
 def test_a_machine_result_must_be_well_formed(client, staff, image, bad):

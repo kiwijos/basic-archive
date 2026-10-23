@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from typing import BinaryIO
 
 import boto3
@@ -35,6 +36,21 @@ class ObjectStorage:
             self._client.upload_fileobj(content, bucket, key, ExtraArgs={"ContentType": content_type})
         except (BotoCoreError, ClientError) as error:
             raise StorageUnavailable(str(error)) from error
+
+    def stream(self, bucket: str, key: str) -> Iterator[bytes]:
+        """The stored file as chunks. Storage is asked first, so a failure surfaces before anything is sent."""
+        try:
+            body = self._client.get_object(Bucket=bucket, Key=key)["Body"]
+        except (BotoCoreError, ClientError) as error:
+            raise StorageUnavailable(str(error)) from error
+
+        def chunks() -> Iterator[bytes]:
+            try:
+                yield from body.iter_chunks(chunk_size=1024 * 1024)
+            finally:
+                body.close()
+
+        return chunks()
 
     def download_url(self, bucket: str, key: str, expires_in: int) -> str:
         return self._client.generate_presigned_url(
