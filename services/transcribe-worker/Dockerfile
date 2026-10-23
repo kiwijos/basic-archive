@@ -15,6 +15,9 @@ RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin app
 COPY --from=build /app/.venv /app/.venv
 COPY contracts /app/contracts
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 CONTRACTS_DIR=/app/contracts
+# One OCR thread per process: scaling comes from more worker pods, and Tesseract's OpenMP threads
+# spin-wait, so several processes sharing few CPUs would otherwise starve one another.
+ENV OMP_THREAD_LIMIT=1
 USER 10001
 EXPOSE 8080
 CMD ["python", "-m", "transcribe_worker.main"]

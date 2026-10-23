@@ -72,8 +72,17 @@ class RunningWorker:
         return self.log_path.read_text()
 
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Remember whether the test failed, so the workers' logs can be shown in full when it did."""
+    outcome = yield
+    report = outcome.get_result()
+    if report.when == "call":
+        item.failed = report.failed
+
+
 @pytest.fixture
-def start_worker(catalog, broker, tmp_path):
+def start_worker(request, catalog, broker, tmp_path):
     """Run transcribe-worker as its own process, configured only through the environment."""
     started: list[RunningWorker] = []
 
@@ -89,6 +98,8 @@ def start_worker(catalog, broker, tmp_path):
             "MAX_ATTEMPTS": "3",
             "RETRY_BACKOFF_SECONDS": "0.05",
             "HEALTH_PORT": str(port),
+            # As in the image: several workers on few CPUs must not fight over Tesseract's threads.
+            "OMP_THREAD_LIMIT": "1",
             **env_overrides,
         }
         # A machine whose package manager already installed the language data needs nothing here;
@@ -114,3 +125,6 @@ def start_worker(catalog, broker, tmp_path):
             worker.process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             worker.process.kill()
+    if getattr(request.node, "failed", False):
+        for number, worker in enumerate(started):
+            print(f"\n--- worker {number} log ---\n{worker.log()}")
