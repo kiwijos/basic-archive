@@ -107,6 +107,7 @@ def subject_landing(hit: dict) -> dict:
         "places": hit.get("places", []),
         "year_from": hit.get("year_from"),
         "year_to": hit.get("year_to"),
+        "external_refs": hit.get("external_refs", []),
         "relations": hit.get("relations", []),
         "documents": hit.get("documents", []),
     }

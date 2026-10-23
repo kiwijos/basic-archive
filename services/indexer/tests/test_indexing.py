@@ -180,3 +180,13 @@ def test_what_a_landing_page_shows_is_stored_with_the_record(indexer, catalog, b
     page = meili.documents("documents")[document["id"]]
     assert page["subjects"][0]["name"] == "Nordstjernan"
     assert page["images"][0]["rights"] == "reserved" and page["images"][0]["text"]
+
+
+def test_a_ships_wikidata_matches_are_stored_with_the_record(indexer, catalog, broker, meili):
+    reference = {"source": "wikidata", "id": "Q219821", "label": "Vasa", "description": "warship", "url": "https://www.wikidata.org/wiki/Q219821", "retrieved_at": "2026-10-23T21:00:00+00:00"}
+    ship = catalog.put(support.ship(name="Vasa", external_refs=[reference]))
+
+    publish(broker, event("ship", ship["id"]))
+
+    assert wait_until(lambda: ship["id"] in meili.documents("subjects")), indexer.log()
+    assert meili.documents("subjects")[ship["id"]]["external_refs"] == [reference]

@@ -35,6 +35,7 @@ class ShipOut(ShipFacts):
     id: uuid.UUID
     name: str | None
     created_by: str
+    external_refs: list[dict]
 
 
 def ship_out(session: Session, subject: Subject, ship: Ship) -> ShipOut:
@@ -42,6 +43,7 @@ def ship_out(session: Session, subject: Subject, ship: Ship) -> ShipOut:
         id=subject.id,
         name=current_name(session, subject.id),
         created_by=subject.created_by,
+        external_refs=subject.external_refs,
         ship_type=ship.ship_type,
         tonnage=ship.tonnage,
         launched=present(ship.launched),

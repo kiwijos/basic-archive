@@ -64,6 +64,7 @@ def ship(**overrides) -> dict:
         "launched": None,
         "fate": None,
         "fate_date": None,
+        "external_refs": [],
         "relations": [],
         "documents": [],
     }

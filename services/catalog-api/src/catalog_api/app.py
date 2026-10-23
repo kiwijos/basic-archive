@@ -11,9 +11,11 @@ from catalog_api.names import router as names_router
 from catalog_api.organisations import router as organisations_router
 from catalog_api.relations import router as relations_router
 from catalog_api.relay import OutboxRelay
+from catalog_api.enrichment import router as enrichment_router
 from catalog_api.indexing import router as indexing_router
 from catalog_api.review import router as review_router
 from catalog_api.settings import Settings
+from catalog_api.wikidata import WikidataClient, WikidataUnavailable
 from catalog_api.ships import router as ships_router
 from catalog_api.storage import ObjectStorage, StorageUnavailable
 from catalog_api.transcriptions import router as transcriptions_router
@@ -32,6 +34,7 @@ def create_app(settings: Settings) -> FastAPI:
         yield
         if relay is not None:
             relay.stop()
+        app.state.wikidata.close()
 
     app = FastAPI(
         title="catalog-api",
@@ -51,6 +54,11 @@ def create_app(settings: Settings) -> FastAPI:
         logger.error("Unhandled error on %s %s", request.method, request.url.path, exc_info=error)
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
+    @app.exception_handler(WikidataUnavailable)
+    async def wikidata_unavailable(request: Request, error: WikidataUnavailable) -> JSONResponse:
+        # Only this request fails; nothing else about the archive depends on Wikidata.
+        return JSONResponse(status_code=error.status_code, content={"detail": error.message})
+
     app.state.settings = settings
     app.state.storage = ObjectStorage(settings)
     app.add_middleware(
@@ -60,6 +68,14 @@ def create_app(settings: Settings) -> FastAPI:
     )
     app.state.staff_names_by_token = settings.staff_names_by_token()
     app.state.service_names_by_token = settings.service_names_by_token()
+    app.state.wikidata = WikidataClient(
+        settings.wikidata_api_url,
+        settings.wikidata_user_agent,
+        settings.wikidata_timeout_seconds,
+        settings.wikidata_attempts,
+        settings.wikidata_backoff_seconds,
+        settings.wikidata_budget_seconds,
+    )
     app.state.engine = create_engine(settings.database_url, pool_pre_ping=True)
     app.include_router(health_router)
     app.include_router(ships_router)
@@ -70,4 +86,5 @@ def create_app(settings: Settings) -> FastAPI:
     app.include_router(transcriptions_router)
     app.include_router(review_router)
     app.include_router(indexing_router)
+    app.include_router(enrichment_router)
     return app

@@ -65,7 +65,7 @@ function documentPage({ record, navigate }) {
 }
 
 /** A Ship's or Organisation's own page: its names over time, its relations to other records, and the Documents about it. */
-function subjectPage({ record, navigate, kind, matchedName }) {
+function subjectPage({ record, navigate, kind, matchedName, staff }) {
   const names = nameTimeline(record.names);
   const years = yearsText(record.year_from, record.year_to);
   const former = names.filter((n) => !n.current);
@@ -99,6 +99,23 @@ function subjectPage({ record, navigate, kind, matchedName }) {
         ),
       )),
     ),
+    record.external_refs?.length
+      ? h(
+          "section",
+          { "aria-labelledby": "elsewhere" },
+          h("h2", { id: "elsewhere" }, "Elsewhere"),
+          h("ul", { class: "links" }, record.external_refs.map((ref) =>
+            h(
+              "li",
+              { "data-source": ref.source },
+              h("a", { href: ref.url, rel: "noopener noreferrer" }, `${ref.label} on Wikidata`),
+              ref.description ? ` – ${ref.description}` : "",
+              h("small", { class: "muted" }, ` (matched by staff, fetched ${ref.retrieved_at.slice(0, 10)})`),
+            ),
+          )),
+        )
+      : null,
+    staff && kind === "ship" ? h("p", { class: "staff-link" }, link(navigate, pathFor("shipEdit", { id: record.id }), "Staff: find this ship on Wikidata")) : null,
     record.relations.length
       ? h(
           "section",
@@ -137,7 +154,7 @@ function subjectPage({ record, navigate, kind, matchedName }) {
 }
 
 /** The permanent page of one record. It is read from the search index, so it is open to everyone. */
-export function recordView({ api, navigate, setTitle, kind, id }) {
+export function recordView({ api, navigate, setTitle, kind, id, staff = false }) {
   let disposed = false;
   let release = () => {};
   const body = h("div", {}, h("p", { role: "status" }, "Loading…"));
@@ -156,7 +173,7 @@ export function recordView({ api, navigate, setTitle, kind, id }) {
         release = page.dispose;
         body.replaceChildren(...page.nodes.filter(Boolean));
       } else {
-        body.replaceChildren(...subjectPage({ record, navigate, kind, matchedName: context.name }).filter(Boolean));
+        body.replaceChildren(...subjectPage({ record, navigate, kind, matchedName: context.name, staff }).filter(Boolean));
       }
     } catch (error) {
       if (disposed) return;

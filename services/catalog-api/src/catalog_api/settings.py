@@ -18,6 +18,15 @@ class Settings(BaseSettings):
     relay_enabled: bool = True
     relay_interval_seconds: float = 0.5
 
+    wikidata_api_url: str = "https://www.wikidata.org/w/api.php"
+    # Wikimedia asks every client to say who it is and how to reach its maintainers.
+    wikidata_user_agent: str = "ShipArchiveLite/0.9 (course project; https://github.com/kiwijos/basic-archive)"
+    wikidata_timeout_seconds: float = 4.0
+    wikidata_attempts: int = 3
+    wikidata_backoff_seconds: float = 0.5
+    # One operation (a search, or reading one item) never takes longer than this, whatever the tries add up to.
+    wikidata_budget_seconds: float = 10.0
+
     def staff_names_by_token(self) -> dict[str, str]:
         return _parse_tokens(self.staff_tokens)
 

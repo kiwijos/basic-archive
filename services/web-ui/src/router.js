@@ -13,6 +13,8 @@ export function parseRoute(location) {
   if (trimmed === "/upload") return { name: "upload", params: {} };
   const review = trimmed.match(/^\/documents\/([^/]+)\/review$/);
   if (review && ID.test(review[1])) return { name: "review", params: { documentId: review[1] } };
+  const edit = trimmed.match(/^\/ships\/([^/]+)\/edit$/);
+  if (edit && ID.test(edit[1])) return { name: "shipEdit", params: { id: edit[1] } };
   const record = trimmed.match(/^\/(ships|organisations|documents)\/([^/]+)$/);
   if (record && ID.test(record[2])) return { name: RECORD_ROUTES[record[1]], params: { id: record[2] } };
   return { name: "notFound", params: {} };
@@ -31,6 +33,8 @@ export function pathFor(name, params = {}) {
       return `/documents/${params.documentId}/review`;
     case "ship":
       return `/ships/${params.id}`;
+    case "shipEdit":
+      return `/ships/${params.id}/edit`;
     case "organisation":
       return `/organisations/${params.id}`;
     case "document":

@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, text
 from catalog_api.app import create_app
 from catalog_api.migrate import run_migrations
 from catalog_api.settings import Settings
+from fake_wikidata import FakeWikidata
 
 TEST_DATABASE_URL = "postgresql+psycopg://postgres:test@localhost:55432/archive_test"
 STAFF_TOKENS = "alice=alice-token,bob=bob-token"
@@ -78,8 +79,22 @@ def s3(s3_url):
     return s3_client
 
 
+@pytest.fixture(scope="session")
+def wikidata_server():
+    fake = FakeWikidata()
+    yield fake
+    fake.stop()
+
+
 @pytest.fixture
-def make_settings(s3_url):
+def wikidata(wikidata_server):
+    """The fake Wikidata, emptied for each test."""
+    wikidata_server.reset()
+    return wikidata_server
+
+
+@pytest.fixture
+def make_settings(s3_url, wikidata_server):
     def make(**overrides) -> Settings:
         values = {
             "database_url": TEST_DATABASE_URL,
@@ -92,6 +107,10 @@ def make_settings(s3_url):
             "s3_secret_access_key": S3_CREDENTIALS["aws_secret_access_key"],
             "s3_region": "us-east-1",
             "masters_bucket": MASTERS_BUCKET,
+            "wikidata_api_url": wikidata_server.url,
+            # Short, so the tests of slow and failing answers do not make the suite wait.
+            "wikidata_backoff_seconds": 0.01,
+            "wikidata_timeout_seconds": 1.0,
         }
         return Settings(**{**values, **overrides})
 

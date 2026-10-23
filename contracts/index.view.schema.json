@@ -215,7 +215,8 @@
         "fate",
         "fate_date",
         "relations",
-        "documents"
+        "documents",
+        "external_refs"
       ],
       "properties": {
         "entity": {
@@ -387,6 +388,45 @@
               },
               "verified": {
                 "type": "boolean"
+              }
+            }
+          }
+        },
+        "external_refs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "id",
+              "label",
+              "description",
+              "url",
+              "retrieved_at"
+            ],
+            "properties": {
+              "source": {
+                "enum": [
+                  "wikidata"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^Q[1-9][0-9]*$"
+              },
+              "label": {
+                "type": "string"
+              },
+              "description": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "url": {
+                "type": "string",
+                "pattern": "^https://www\\.wikidata\\.org/wiki/Q[1-9][0-9]*$"
+              },
+              "retrieved_at": {
+                "type": "string"
               }
             }
           }

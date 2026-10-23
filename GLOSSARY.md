@@ -69,3 +69,7 @@ _Avoid_: Link, association, ownership record
 **Uncertain date**:
 A date kept as written (for example "ca 1890") together with the earliest and latest dates it could mean.
 _Avoid_: Fuzzy date, approximate date
+
+**External reference**:
+A fact about a Subject taken from another source, kept with where it came from, its identifier there and when it was fetched. For now the only source is Wikidata, and a person always chooses the match; nothing is matched automatically.
+_Avoid_: Link, enrichment, linked data

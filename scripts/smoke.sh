@@ -327,6 +327,32 @@ for page in "ships/$ship" "documents/$document" "ships/$sister"; do
   [ "$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "$BASE_URL/$page")" = "200 text/html" ] || fail "the address /$page does not give the app, so reload and sharing would break"
 done
 
+# Wikidata: staff ask for candidates and choose one; nothing is stored by asking. Refusals need no internet.
+unknown_ship=00000000-0000-4000-8000-000000000000
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/catalog/ships/$ship/wikidata-candidates")" = 401 ] || fail "asking Wikidata for candidates without a token was not refused"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE_URL/api/catalog/ships/$ship/wikidata/Q219821")" = 401 ] || fail "choosing a Wikidata match without a token was not refused"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE_URL/api/catalog/ships/$ship/wikidata/not-an-item" -H @"$auth_header")" = 422 ] || fail "a bad Wikidata identifier was not refused"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/catalog/ships/$unknown_ship/wikidata-candidates" -H @"$auth_header")" = 404 ] || fail "candidates for an unknown ship were not refused"
+# The real Wikidata is somebody else's service on the internet. If this machine cannot reach it the check
+# is skipped and says so; it is never passed silently.
+if curl -sf --max-time 8 -o /dev/null "https://www.wikidata.org/w/api.php?action=query&meta=siteinfo&format=json"; then
+  [ "$(api GET "/ships/$ship" | jq '.external_refs | length')" = 0 ] || fail "the ship already had Wikidata matches"
+  api GET "/ships/$ship/wikidata-candidates?q=Vasa" | jq -e 'any(.candidates[]; .id == "Q219821" and (.description | length > 0) and .url == "https://www.wikidata.org/wiki/Q219821")' >/dev/null \
+    || fail "the real Wikidata did not list the Vasa among the candidates for Vasa"
+  [ "$(api GET "/ships/$ship" | jq '.external_refs | length')" = 0 ] || fail "asking for candidates stored something"
+  api PUT "/ships/$ship/wikidata/Q219821" | jq -e '.source == "wikidata" and .id == "Q219821" and .chosen_by == "'"$staff_name"'" and (.retrieved_at | length > 0)' >/dev/null \
+    || fail "choosing a Wikidata match did not store its source, identifier and retrieval time"
+  api GET "/ships/$ship" | jq -e '.external_refs | map(.id) == ["Q219821"]' >/dev/null || fail "the chosen match was not stored on the ship"
+  search_for "/subjects/$ship" 'any(.external_refs[]; .source == "wikidata" and .id == "Q219821" and (.retrieved_at | length > 0))' 30 \
+    || fail "the chosen Wikidata match did not reach search"
+  api DELETE "/ships/$ship/wikidata/Q219821" >/dev/null || fail "removing the Wikidata match failed"
+  search_for "/subjects/$ship" '.external_refs | length == 0' 30 || fail "the removed Wikidata match is still in search"
+  wikidata_checked="Wikidata candidates listed, a match chosen with its source and retrieval time, found in search and removed"
+else
+  echo "SKIPPED: Wikidata cannot be reached from this machine, so choosing a real match was not tried"
+  wikidata_checked="Wikidata refusals checked (the real service was not reachable, so choosing a match was skipped)"
+fi
+
 # A deleted record leaves the index.
 doomed=$(api POST /ships "{\"name\":\"Doomed $run\"}" | jq -r .id)
 search_for /subjects "any(.hits[]; .id == \"$doomed\")" 30 --data-urlencode "q=Doomed $run" || fail "the new ship never reached search"
@@ -341,4 +367,4 @@ first_cache=$(curl -sG -D - -o /dev/null "$BASE_URL/api/search/documents" --data
 second_cache=$(curl -sG -D - -o /dev/null "$BASE_URL/api/search/documents" --data-urlencode "q=$cache_probe" | tr -d '\r' | awk -F': ' 'tolower($1) == "x-cache" {print $2}')
 [ "$first_cache,$second_cache" = "MISS,HIT" ] || fail "repeated queries were not cached: $first_cache,$second_cache"
 
-echo "SMOKE OK: ship $id created and read back as $staff_name; renames, sale, rebuild, validation and delete verified; Image uploaded to Garage, duplicate flagged, link read back, download address works and expires, key rights verified; page read automatically at $accuracy accuracy, corrupt image failed into the dead-letter queue, re-read works; page added, scan served, correction verified and kept beside the readings, review queue counts right, web UI served with deep links; search finds the corrected document verified, the unverified one only by default, a ship by its old name, builder and year from Relations, deletes leave the index, page size capped, cache hits; open landing records for a Document and for two Ships, with rights, verified state, names, relations and a rebuilt-from link, and their addresses reload; IIIF information, a tile and the links in search results work through the Ingress and Garage is not exposed"
+echo "SMOKE OK: ship $id created and read back as $staff_name; renames, sale, rebuild, validation and delete verified; Image uploaded to Garage, duplicate flagged, link read back, download address works and expires, key rights verified; page read automatically at $accuracy accuracy, corrupt image failed into the dead-letter queue, re-read works; page added, scan served, correction verified and kept beside the readings, review queue counts right, web UI served with deep links; search finds the corrected document verified, the unverified one only by default, a ship by its old name, builder and year from Relations, deletes leave the index, page size capped, cache hits; open landing records for a Document and for two Ships, with rights, verified state, names, relations and a rebuilt-from link, and their addresses reload; $wikidata_checked; IIIF information, a tile and the links in search results work through the Ingress and Garage is not exposed"

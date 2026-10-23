@@ -143,3 +143,10 @@ mark { background: #fff1a8; color: inherit; padding: 0 .1em; border-radius: 2px;
 .viewer-pages button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 .viewer-status { color: var(--muted); margin: .25rem 0; }
 .viewer-stage { height: min(75vh, 46rem); min-height: 22rem; background: #0b1b3a; border: 1px solid var(--line); border-radius: 4px; }
+
+/* ---- staff ship page ---- */
+.stored-matches, .candidates { padding-left: 1.2rem; }
+.candidate { margin-bottom: 1rem; }
+.candidate p { margin: .15rem 0 .35rem; }
+.muted { color: var(--muted); }
+.staff-link { margin-top: 1.5rem; }

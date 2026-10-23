@@ -5,6 +5,7 @@ import { session } from "./session.js";
 import { link } from "./widgets.js";
 import { recordView } from "./views/record.js";
 import { searchView } from "./views/search.js";
+import { shipEditView } from "./views/ship-edit.js";
 import { queueView } from "./views/queue.js";
 import { reviewView } from "./views/review.js";
 import { signInView } from "./views/sign-in.js";
@@ -62,7 +63,7 @@ function notFoundView() {
 }
 
 // Searching and every record's own page are open to everyone; only the staff pages ask for a token.
-const STAFF_PAGES = new Set(["queue", "upload", "review"]);
+const STAFF_PAGES = new Set(["queue", "upload", "review", "shipEdit"]);
 
 function setTitle(text) {
   document.title = `${text} · Ship Archive`;
@@ -86,7 +87,8 @@ function render() {
       },
     });
   } else if (route.name === "search") view = searchView({ api: searchApi, navigate, setTitle });
-  else if (["ship", "organisation", "document"].includes(route.name)) view = recordView({ api: searchApi, navigate, setTitle, kind: route.name, id: route.params.id });
+  else if (["ship", "organisation", "document"].includes(route.name)) view = recordView({ api: searchApi, navigate, setTitle, kind: route.name, id: route.params.id, staff: Boolean(session.token()) });
+  else if (route.name === "shipEdit") view = shipEditView({ api, navigate, id: route.params.id });
   else if (route.name === "queue") view = queueView({ api, navigate });
   else if (route.name === "upload") view = uploadView({ api, navigate });
   else if (route.name === "review") view = reviewView({ api, navigate, documentId: route.params.documentId });

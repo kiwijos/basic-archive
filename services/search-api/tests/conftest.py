@@ -136,6 +136,7 @@ def subject(name="Vega", *, names=None, **overrides) -> dict:
         "launched": None,
         "fate": None,
         "fate_date": None,
+        "external_refs": [],
         "relations": [],
         "documents": [],
     }

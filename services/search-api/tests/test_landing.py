@@ -85,3 +85,15 @@ def test_search_results_do_not_carry_the_page_texts_or_relations_of_the_landing_
 
     assert "images" not in doc and "relations" not in ship and "documents" not in ship
     assert doc["pages"] and doc["thumbnail"]
+
+
+def test_a_ships_landing_record_carries_its_wikidata_matches_and_search_results_do_not(client, meili):
+    reference = {"source": "wikidata", "id": "Q219821", "label": "Vasa", "description": "warship", "url": "https://www.wikidata.org/wiki/Q219821", "retrieved_at": "2026-10-23T21:00:00+00:00"}
+    ship = subject("Vasa", external_refs=[reference])
+    meili.add("subjects", ship)
+
+    page = client.get(f"{API}/subjects/{ship['id']}").json()
+    [hit] = client.get(f"{API}/subjects", params={"q": "Vasa"}).json()["hits"]
+
+    assert page["external_refs"] == [reference]
+    assert "external_refs" not in hit
