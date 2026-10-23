@@ -7,6 +7,7 @@ resources:
   - rabbitmq.yaml
   - catalog-api.yaml
   - transcribe-worker.yaml
+  - web-ui.yaml
   - ingress.yaml
 configMapGenerator:
   - name: garage-config
@@ -24,6 +25,8 @@ configMapGenerator:
 # One version tag per slice; every custom image is pinned to it and never uses latest.
 images:
   - name: kiwijos/ship-archive-catalog-api
-    newTag: 0.4.0
+    newTag: 0.5.0
   - name: kiwijos/ship-archive-transcribe-worker
-    newTag: 0.4.0
+    newTag: 0.5.0
+  - name: kiwijos/ship-archive-web-ui
+    newTag: 0.5.0

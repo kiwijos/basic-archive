@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from catalog_api.auth import service_name, staff_name
+from catalog_api.auth import Caller, any_caller, service_name, staff_name
 from catalog_api.db import get_session
 from catalog_api.documents import find_image
 from catalog_api.events import document_changed, ocr_requested
@@ -20,14 +20,24 @@ logger = logging.getLogger(__name__)
 NonBlank = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
+MAX_TEXT_CHARACTERS = 500_000
+
+
 class MachineResultIn(BaseModel):
     source: Literal["machine"]
     # A blank page legitimately reads as no text at all.
-    text: str
+    text: str = Field(max_length=MAX_TEXT_CHARACTERS)
     engine: NonBlank
     engine_version: NonBlank
     language: NonBlank
     confidence: float | None = Field(default=None, ge=0, le=1)
+
+
+class HumanTranscriptionIn(BaseModel):
+    source: Literal["human"]
+    # Empty is allowed: a person can confirm that a page really has no text.
+    text: str = Field(max_length=MAX_TEXT_CHARACTERS)
+    language: str | None = None
 
 
 class FailureIn(BaseModel):
@@ -74,24 +84,39 @@ def announce_document_of(session: Session, image: Image) -> None:
 
 
 @router.post("/images/{image_id}/transcriptions", status_code=201)
-def add_machine_transcription(
+def add_transcription(
     image_id: uuid.UUID,
-    result: MachineResultIn,
-    author: str = Depends(service_name),
+    body: Annotated[MachineResultIn | HumanTranscriptionIn, Field(discriminator="source")],
+    caller: Caller = Depends(any_caller),
     session: Session = Depends(get_session),
 ) -> TranscriptionOut:
+    # Who may write which kind: the worker its machine readings, staff their corrections.
+    if body.source == "machine" and caller.kind != "service":
+        raise HTTPException(status_code=401, detail="A valid service token is required")
+    if body.source == "human" and caller.kind != "staff":
+        raise HTTPException(status_code=401, detail="A valid staff token is required")
     image = find_image(session, image_id)
-    refuse_unless(move_image(session, image_id, ("pending",), "ocr_done"), image, "only a pending Image takes a result")
-    transcription = Transcription(
-        image_id=image_id,
-        source="machine",
-        text=result.text,
-        engine=result.engine,
-        engine_version=result.engine_version,
-        language=result.language,
-        confidence=result.confidence,
-        created_by=author,
-    )
+    if body.source == "machine":
+        refuse_unless(
+            move_image(session, image_id, ("pending",), "ocr_done"), image, "only a pending Image takes a result"
+        )
+        transcription = Transcription(
+            image_id=image_id,
+            source="machine",
+            text=body.text,
+            engine=body.engine,
+            engine_version=body.engine_version,
+            language=body.language,
+            confidence=body.confidence,
+            created_by=caller.name,
+        )
+    else:
+        # A person's text settles the Image whatever state it was in: even one the OCR has not
+        # reached yet, or failed on. A machine result arriving later is then refused.
+        move_image(session, image_id, ("pending", "ocr_done", "failed", "verified"), "verified")
+        transcription = Transcription(
+            image_id=image_id, source="human", text=body.text, language=body.language, created_by=caller.name
+        )
     session.add(transcription)
     session.flush()
     session.refresh(transcription)

@@ -16,6 +16,7 @@ make deploy          # creates Secrets if missing, applies everything, waits for
 make smoke           # exercises the API through the Ingress, Garage, and the OCR worker behind it
 make ocr-parallel    # three workers read ten uploaded pages at once, each exactly once
 make resilience      # restarts RabbitMQ and kills catalog-api at awkward moments
+make e2e             # drives the web UI in a real browser: sign in, upload, correct, leave the queue
 ```
 
 `make deploy` runs two Jobs each time, both safe to repeat: the database migration, and `garage-init`, which prepares Garage (cluster layout, the `masters` and `derivatives` buckets, one access key per service with only the rights it needs). Garage keeps its data on a 5 Gi volume and runs as a single instance.
@@ -24,13 +25,15 @@ Uploading an Image queues an OCR job. catalog-api writes every event to an outbo
 
 The app is served on `http://localhost`. `make deploy` generates random Secrets on first run and adds any a newer slice needs; set `STAFF_NAMES="alice bob"` to choose the staff names the tokens belong to. Real Secrets are never committed, see `k8s/secrets.template.yaml` for their shape.
 
+Open `http://localhost` and sign in with a staff token. Print yours with `kubectl -n ship-archive get secret catalog-api-secrets -o jsonpath='{.data.STAFF_TOKENS}' | base64 -d` (the format is `name=token`, comma-separated). Staff can upload a scan, wait for the machine's reading, correct it against the image, and save it as verified. The review queue lists every Document with a page nobody has verified yet, oldest first, 50 to a page. The scan is shown through a staff-only endpoint on catalog-api, because browsers cannot reach Garage; browsers cannot display TIFF, so a TIFF page offers a download instead. The staff token is kept in `sessionStorage`, so it is gone when the tab closes. For UI development, `cd services/web-ui && npm run dev` proxies `/api` to the cluster.
+
 An image rebuilt under a tag that is already deployed is not picked up by `make deploy`, and the cluster node keeps its cached copy too. To use a local rebuild, remove the node's copy and restart: `docker exec desktop-control-plane crictl rmi docker.io/kiwijos/ship-archive-<service>:<tag>` then `kubectl -n ship-archive rollout restart deployment/<service>`. Build from the repository root, for example `docker build -f services/catalog-api/Dockerfile -t kiwijos/ship-archive-catalog-api:<tag> .`, because every image copies `contracts/`.
 
 ## Tests
 
 ```
 make test-db   # throwaway Postgres (port 55432) and RabbitMQ (port 56672)
-make test      # API tests and worker tests against them; the worker tests run real Tesseract
+make test      # API, worker and web-ui unit tests; the worker tests run real Tesseract
 ```
 
 ## Releasing images

@@ -1,4 +1,4 @@
-.PHONY: cluster-tools secrets deploy smoke ocr-parallel resilience test test-db
+.PHONY: cluster-tools secrets deploy smoke e2e ocr-parallel resilience test test-db
 
 # One-time cluster prerequisites: Traefik and metrics-server (needs helm).
 cluster-tools:
@@ -18,9 +18,15 @@ deploy: secrets
 	kubectl -n ship-archive wait --for=condition=complete job/catalog-api-migrate job/garage-init --timeout=240s
 	kubectl -n ship-archive rollout status deployment/catalog-api --timeout=180s
 	kubectl -n ship-archive rollout status deployment/transcribe-worker --timeout=180s
+	kubectl -n ship-archive rollout status deployment/web-ui --timeout=180s
 
 smoke:
 	./scripts/smoke.sh
+
+# Drives the real browser UI against the cluster: sign in, upload, correct, and leave the queue.
+# Needs the cluster deployed and the staff token (see README); installs Chromium on first use.
+e2e:
+	./scripts/e2e.sh
 
 # Scales the worker to three replicas and uploads ten pages at once, then scales it back.
 ocr-parallel:
@@ -42,3 +48,4 @@ test-db:
 test:
 	cd services/catalog-api && uv run pytest -q
 	cd services/transcribe-worker && uv run pytest -q
+	cd services/web-ui && npm test

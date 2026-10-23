@@ -3,8 +3,9 @@ from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, BeforeValidator, ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from catalog_api.auth import staff_name, staff_or_service_name
@@ -13,6 +14,7 @@ from catalog_api.db import get_session
 from catalog_api.events import document_changed, ocr_requested
 from catalog_api.models import Document, DocumentSubject, Image, Subject
 from catalog_api.names import current_name, find_subject
+from catalog_api.verification import Reading, readings_of
 from catalog_api.settings import Settings
 from catalog_api.storage import ObjectStorage
 from catalog_api.uploads import FileTooLarge, fingerprint, sniff_mime
@@ -39,7 +41,7 @@ def get_storage(request: Request) -> ObjectStorage:
     return request.app.state.storage
 
 
-class ImageOut(BaseModel):
+class ImageRecord(BaseModel):
     id: uuid.UUID
     document_id: uuid.UUID
     page_no: int
@@ -48,6 +50,13 @@ class ImageOut(BaseModel):
     original_filename: str | None
     rights: str
     review_status: str
+
+
+class ImageOut(ImageRecord):
+    # Worked out from the Image's Transcriptions, see verification.py.
+    verified: bool
+    text_source: str | None
+    current_text: str | None
 
 
 class SubjectLinkIn(BaseModel):
@@ -71,6 +80,10 @@ class DocumentOut(BaseModel):
     created_by: str
     images: list[ImageOut]
     subjects: list[SubjectLinkOut]
+    # A Document is verified only when every one of its Images is.
+    verified: bool
+    verified_images: int
+    image_count: int
 
 
 class UploadOut(DocumentOut):
@@ -78,8 +91,14 @@ class UploadOut(DocumentOut):
     duplicate_of_image_id: uuid.UUID | None
 
 
-def image_out(image: Image) -> ImageOut:
-    return ImageOut.model_validate(image, from_attributes=True)
+def image_out(image: Image, reading: Reading) -> ImageOut:
+    record = ImageRecord.model_validate(image, from_attributes=True)
+    return ImageOut(
+        **record.model_dump(),
+        verified=reading.verified,
+        text_source=reading.text_source,
+        current_text=reading.current_text,
+    )
 
 
 def link_out(session: Session, subject: Subject, role: str | None) -> SubjectLinkOut:
@@ -106,7 +125,10 @@ def document_fields(session: Session, document: Document) -> dict:
         select(Image)
         .where(Image.document_id == document.id, Image.deleted_at.is_(None))
         .order_by(Image.page_no)
-    )
+    ).all()
+    readings = readings_of(session, [image.id for image in images])
+    pages = [image_out(image, readings[image.id]) for image in images]
+    verified_pages = sum(page.verified for page in pages)
     return {
         "id": document.id,
         "title": document.title,
@@ -115,8 +137,11 @@ def document_fields(session: Session, document: Document) -> dict:
         "physical_location": document.physical_location,
         "description": document.description,
         "created_by": document.created_by,
-        "images": [image_out(image) for image in images],
+        "images": pages,
         "subjects": links_of(session, document.id),
+        "verified": bool(pages) and verified_pages == len(pages),
+        "verified_images": verified_pages,
+        "image_count": len(pages),
     }
 
 
@@ -171,7 +196,27 @@ def find_image(session: Session, image_id: uuid.UUID) -> Image:
 
 @router.get("/images/{image_id}", dependencies=[Depends(staff_or_service_name)])
 def read_image(image_id: uuid.UUID, session: Session = Depends(get_session)) -> ImageOut:
-    return image_out(find_image(session, image_id))
+    image = find_image(session, image_id)
+    return image_out(image, readings_of(session, [image.id])[image.id])
+
+
+@router.get("/images/{image_id}/content", dependencies=[Depends(staff_name)])
+def read_image_content(
+    image_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    storage: ObjectStorage = Depends(get_storage),
+) -> StreamingResponse:
+    """The original file, so a browser can show the page. Garage is not reachable from a browser."""
+    image = find_image(session, image_id)
+    return StreamingResponse(
+        storage.stream(image.bucket, image.object_key),
+        media_type=image.mime,
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, max-age=300",
+            "Content-Disposition": "inline",
+        },
+    )
 
 
 @router.get("/images/{image_id}/download-url", dependencies=[Depends(staff_or_service_name)])
@@ -187,6 +232,91 @@ def download_url(
     return DownloadAddress(
         url=storage.download_url(image.bucket, image.object_key, lifetime), expires_in=lifetime
     )
+
+
+def inspect_upload(file: UploadFile, settings: Settings) -> tuple[str, str]:
+    """The MIME type and SHA-256 of an uploaded file, or an HTTP refusal if it is not acceptable."""
+    mime = sniff_mime(file.file)
+    if mime is None:
+        raise HTTPException(
+            status_code=415,
+            detail="Only TIFF, JPEG and PNG files are accepted. Convert PDF and HEIC files first.",
+        )
+    try:
+        return mime, fingerprint(file.file, settings.max_upload_bytes)
+    except FileTooLarge:
+        raise HTTPException(
+            status_code=413,
+            detail=f"The file is larger than the {settings.max_upload_bytes} byte limit",
+        )
+
+
+def earlier_upload_of(session: Session, sha256: str) -> uuid.UUID | None:
+    return session.scalars(
+        select(Image.id)
+        .where(Image.sha256 == sha256, Image.deleted_at.is_(None))
+        .order_by(Image.created_at)
+        .limit(1)
+    ).first()
+
+
+def store_page(
+    session: Session,
+    storage: ObjectStorage,
+    settings: Settings,
+    document: Document,
+    file: UploadFile,
+    mime: str,
+    sha256: str,
+    rights: str,
+    page_no: int,
+    author: str,
+) -> None:
+    """Keep the file, record its Image as the next page, and queue it for OCR."""
+    # The file goes first: if storage fails nothing is recorded, and an object whose rows
+    # never got committed is an unreferenced leftover, not a broken record.
+    image_id = uuid.uuid4()
+    storage.put(settings.masters_bucket, str(image_id), file.file, mime)
+    session.add(
+        Image(
+            id=image_id,
+            document_id=document.id,
+            page_no=page_no,
+            bucket=settings.masters_bucket,
+            object_key=str(image_id),
+            sha256=sha256,
+            mime=mime,
+            original_filename=file.filename,
+            review_status="pending",
+            rights=rights,
+            created_by=author,
+        )
+    )
+    session.flush()
+    document_changed(session, document)
+    ocr_requested(session, image_id)
+
+
+@router.post("/documents/{document_id}/images", status_code=201)
+def add_page(
+    document_id: uuid.UUID,
+    file: UploadFile,
+    rights: Annotated[Rights, Form()] = "reserved",
+    author: str = Depends(staff_name),
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+    storage: ObjectStorage = Depends(get_storage),
+) -> UploadOut:
+    """Add another page to a Document. Locking the Document keeps two uploads from taking the same page number."""
+    find_document(session, document_id)
+    document = session.scalars(select(Document).where(Document.id == document_id).with_for_update()).one()
+    mime, sha256 = inspect_upload(file, settings)
+    duplicate_of = earlier_upload_of(session, sha256)
+    last_page = session.scalar(
+        select(func.max(Image.page_no)).where(Image.document_id == document_id, Image.deleted_at.is_(None))
+    )
+    store_page(session, storage, settings, document, file, mime, sha256, rights, (last_page or 0) + 1, author)
+    return UploadOut(**document_fields(session, document), duplicate_of_image_id=duplicate_of)
 
 
 @router.post("/documents", status_code=201)
@@ -212,31 +342,8 @@ def upload_document(
     except ValidationError as error:
         raise HTTPException(status_code=422, detail=error.errors()[0]["msg"]) from error
 
-    mime = sniff_mime(file.file)
-    if mime is None:
-        raise HTTPException(
-            status_code=415,
-            detail="Only TIFF, JPEG and PNG files are accepted. Convert PDF and HEIC files first.",
-        )
-    try:
-        sha256 = fingerprint(file.file, settings.max_upload_bytes)
-    except FileTooLarge:
-        raise HTTPException(
-            status_code=413,
-            detail=f"The file is larger than the {settings.max_upload_bytes} byte limit",
-        )
-
-    duplicate_of = session.scalars(
-        select(Image.id)
-        .where(Image.sha256 == sha256, Image.deleted_at.is_(None))
-        .order_by(Image.created_at)
-        .limit(1)
-    ).first()
-
-    # The file goes first: if storage fails nothing is recorded, and an object whose rows
-    # never got committed is an unreferenced leftover, not a broken record.
-    image_id = uuid.uuid4()
-    storage.put(settings.masters_bucket, str(image_id), file.file, mime)
+    mime, sha256 = inspect_upload(file, settings)
+    duplicate_of = earlier_upload_of(session, sha256)
 
     document = Document(
         title=title.strip(),
@@ -248,22 +355,5 @@ def upload_document(
     )
     session.add(document)
     session.flush()
-    session.add(
-        Image(
-            id=image_id,
-            document_id=document.id,
-            page_no=1,
-            bucket=settings.masters_bucket,
-            object_key=str(image_id),
-            sha256=sha256,
-            mime=mime,
-            original_filename=file.filename,
-            review_status="pending",
-            rights=rights,
-            created_by=author,
-        )
-    )
-    session.flush()
-    document_changed(session, document)
-    ocr_requested(session, image_id)
+    store_page(session, storage, settings, document, file, mime, sha256, rights, 1, author)
     return UploadOut(**document_fields(session, document), duplicate_of_image_id=duplicate_of)

@@ -16,7 +16,7 @@ token=${first_pair#*=}
 # The token travels in a private file read by curl, not on a command line where `ps` would show it.
 auth_header=$(mktemp)
 printf 'Authorization: Bearer %s\n' "$token" > "$auth_header"
-trap 'rm -f "$auth_header" "${scan:-}" "${pdf:-}" "${corrupt:-}"' EXIT
+trap 'rm -f "$auth_header" "${scan:-}" "${pdf:-}" "${corrupt:-}" "${page_two:-}"' EXIT
 
 status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/catalog/ships" \
   -H 'Content-Type: application/json' -d '{"name":"Unauthorised"}')
@@ -78,7 +78,7 @@ status=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/catalog/ships/$re
 
 # An Image is uploaded, stored in Garage, linked to the ship, and a re-upload is flagged.
 # The page is typed Swedish text, so the OCR further down can be checked against what it says.
-scan=$(mktemp); pdf=$(mktemp); corrupt=$(mktemp)
+scan=$(mktemp); pdf=$(mktemp); corrupt=$(mktemp); page_two=$(mktemp)
 expected_text=$(uv run --quiet --no-project --with pillow==11.3.0 python "$(dirname "$0")/make_scan.py" "$scan" "$run") \
   || fail "could not render the test scan (is uv installed?)"
 upload() { # upload FILE_PATH TITLE: print the JSON answer, fail on any non-2xx status
@@ -189,4 +189,63 @@ api POST "/images/$image/ocr" >/dev/null || fail "reading a finished Image again
 wait_for_status "$image" ocr_done 90 || fail "the re-read Image never reached ocr_done"
 [ "$(api GET "/images/$image/transcriptions" | jq length)" = 2 ] || fail "the first reading was not kept"
 
-echo "SMOKE OK: ship $id created and read back as $staff_name; renames, sale, rebuild, validation and delete verified; Image uploaded to Garage, duplicate flagged, link read back, download address works and expires, key rights verified; page read automatically at $accuracy accuracy, corrupt image failed into the dead-letter queue, re-read works"
+# A person's correction is a Human transcription. It verifies its page and keeps the earlier readings,
+# and a Document stays in the review queue, with a count, until every page is verified.
+[ "$(api GET /me | jq -r .name)" = "$staff_name" ] || fail "/me does not say who the token belongs to"
+queue_item() { # queue_item DOCUMENT_ID: print the Document's queue entry, or fail if it is not in the queue
+  local offset=0 page
+  while :; do
+    page=$(api GET "/review-queue?limit=200&offset=$offset")
+    echo "$page" | jq -ce --arg id "$1" '.[] | select(.id == $id)' && return 0
+    [ "$(echo "$page" | jq length)" -lt 200 ] && return 1
+    offset=$((offset + 200))
+  done
+}
+machine_body='{"source":"machine","text":"x","engine":"e","engine_version":"1","language":"swe"}'
+status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/catalog/images/$image/transcriptions" \
+  -H @"$auth_header" -H 'Content-Type: application/json' -d "$machine_body")
+[ "$status" = 401 ] || fail "Staff posting a Machine transcription returned $status, expected 401"
+status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/catalog/images/$image/transcriptions" \
+  -H 'Content-Type: application/json' -d '{"source":"human","text":"x"}')
+[ "$status" = 401 ] || fail "a correction without a token returned $status, expected 401"
+
+uv run --quiet --no-project --with pillow==11.3.0 python "$(dirname "$0")/make_scan.py" "$page_two" "$run-page-two" >/dev/null
+added=$(curl -sf -X POST "$BASE_URL/api/catalog/documents/$document/images" -H @"$auth_header" \
+  -F "file=@$page_two;type=image/png") || fail "adding a second page failed"
+page2=$(echo "$added" | jq -r '.images[1].id')
+[ "$(echo "$added" | jq -r '.images | map(.page_no) | join(",")')" = "1,2" ] || fail "the second page was not numbered 2: $added"
+
+content_headers=$(mktemp)
+served=$(curl -sf -D "$content_headers" "$BASE_URL/api/catalog/images/$image/content" -H @"$auth_header" | shasum -a 256 | cut -d' ' -f1)
+[ "$served" = "$(shasum -a 256 < "$scan" | cut -d' ' -f1)" ] || fail "the served scan differs from the uploaded file"
+grep -qi '^x-content-type-options: nosniff' "$content_headers" || fail "the scan is served without nosniff"
+rm -f "$content_headers"
+status=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/catalog/images/$image/content")
+[ "$status" = 401 ] || fail "the scan was served without a token ($status)"
+
+corrected="Skeppet Vega lämnade Göteborg den 14 mars 1891."
+api POST "/images/$image/transcriptions" "{\"source\":\"human\",\"text\":\"$corrected\"}" >/dev/null || fail "saving a correction failed"
+api GET "/images/$image" | jq -e --arg text "$corrected" '.verified and .review_status == "verified" and .text_source == "human" and .current_text == $text' >/dev/null \
+  || fail "the corrected Image is not verified with the corrected text"
+history=$(api GET "/images/$image/transcriptions")
+[ "$(echo "$history" | jq 'map(.source) | join(",")' -r)" = "human,machine,machine" ] || fail "the earlier readings were not kept: $history"
+[ "$(echo "$history" | jq -r '.[0].created_by')" = "$staff_name" ] || fail "the correction does not say who made it"
+
+entry=$(queue_item "$document") || fail "a partly verified Document is not in the review queue"
+echo "$entry" | jq -e '.verified_images == 1 and .image_count == 2' >/dev/null || fail "the queue entry has the wrong counts: $entry"
+api GET "/documents/$document" | jq -e '(.verified | not) and .verified_images == 1 and .image_count == 2' >/dev/null \
+  || fail "a half-verified Document is reported as verified"
+status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/catalog/images/$image/ocr" -H @"$auth_header")
+[ "$status" = 409 ] || fail "reading a verified Image again returned $status, expected 409"
+
+wait_for_status "$page2" ocr_done 90 || fail "the added page never reached ocr_done"
+api POST "/images/$page2/transcriptions" '{"source":"human","text":"Sida två."}' >/dev/null || fail "correcting the second page failed"
+api GET "/documents/$document" | jq -e '.verified and .verified_images == 2' >/dev/null || fail "the Document is not verified after both pages are"
+queue_item "$document" >/dev/null && fail "a fully verified Document is still in the review queue"
+
+# The web UI is served at the root, and an address inside it survives a reload.
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/")" = 200 ] || fail "the web UI is not served at the root"
+deep=$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "$BASE_URL/documents/$document/review")
+[ "$deep" = "200 text/html" ] || fail "a deep UI address did not fall back to the app: $deep"
+
+echo "SMOKE OK: ship $id created and read back as $staff_name; renames, sale, rebuild, validation and delete verified; Image uploaded to Garage, duplicate flagged, link read back, download address works and expires, key rights verified; page read automatically at $accuracy accuracy, corrupt image failed into the dead-letter queue, re-read works; page added, scan served, correction verified and kept beside the readings, review queue counts right, web UI served with deep links"
