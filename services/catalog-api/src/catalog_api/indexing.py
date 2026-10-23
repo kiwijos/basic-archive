@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 from catalog_api.auth import only_service
 from catalog_api.contracts import validate
 from catalog_api.db import get_session
+from catalog_api.dates import present
 from catalog_api.documents import document_fields, find_document
 from catalog_api.models import Document, DocumentSubject, Organisation, Relation, Ship, Subject
 from catalog_api.names import current_name, current_name_row, names_of
@@ -16,6 +18,7 @@ from catalog_api.relations import live_relations
 from catalog_api.ships import find_ship
 
 MAX_PAGE = 100
+MAX_LINKED_DOCUMENTS = 200
 
 
 def checked(view: dict) -> dict:
@@ -58,7 +61,22 @@ def document_view(session: Session, document_id: uuid.UUID) -> dict:
         "verified": fields["verified"],
         "verified_images": fields["verified_images"],
         "image_count": fields["image_count"],
-        "images": [{"id": str(image.id), "page_no": image.page_no} for image in images],
+        "images": [
+            {
+                "id": str(image.id),
+                "page_no": image.page_no,
+                "mime": image.mime,
+                "rights": image.rights,
+                "verified": image.verified,
+                "text_source": image.text_source,
+                "text": image.current_text or "",
+            }
+            for image in images
+        ],
+        "subjects": [
+            {"id": str(link.subject_id), "kind": link.kind, "name": link.name, "role": link.role}
+            for link in fields["subjects"]
+        ],
         "ship_names": ship_names,
         "ship_types": ship_types,
         "builders": builders,
@@ -111,15 +129,84 @@ def built_facts(session: Session, ship_id: uuid.UUID, ship: Ship) -> dict:
     }
 
 
+def _iso(value) -> str | None:
+    return value.isoformat() if value else None
+
+
+def _uncertain(value) -> dict | None:
+    value = present(value)
+    if value is None:
+        return None
+    return {"date_text": value.date_text, "date_from": _iso(value.date_from), "date_to": _iso(value.date_to)}
+
+
+def relations_of(session: Session, subject_id: uuid.UUID) -> list[dict]:
+    """A Subject's live Relations in both directions, each naming the Subject at the other end."""
+    found = []
+    for relation in session.scalars(live_relations(session, subject_id)):
+        outgoing = relation.from_subject_id == subject_id
+        other_id = relation.to_subject_id if outgoing else relation.from_subject_id
+        found.append(
+            (
+                (relation.date_from or date.min, relation.created_at),
+                {
+                    "predicate": relation.predicate,
+                    # "from": this Subject is the one the predicate is about (it was built_by ...).
+                    "direction": "from" if outgoing else "to",
+                    "other_id": str(other_id),
+                    "other_kind": session.get(Subject, other_id).kind,
+                    "other_name": current_name(session, other_id),
+                    "place": relation.place,
+                    "date_text": relation.date_text,
+                    "date_from": _iso(relation.date_from),
+                    "date_to": _iso(relation.date_to),
+                    "source": relation.source,
+                },
+            )
+        )
+    return [relation for _, relation in sorted(found, key=lambda pair: pair[0])]
+
+
+def linked_documents(session: Session, subject_id: uuid.UUID) -> list[dict]:
+    documents = session.scalars(
+        select(Document)
+        .join(DocumentSubject, DocumentSubject.document_id == Document.id)
+        .where(DocumentSubject.subject_id == subject_id, Document.deleted_at.is_(None))
+        .order_by(Document.created_at)
+        .limit(MAX_LINKED_DOCUMENTS)
+    ).all()
+    return [
+        {
+            "id": str(document.id),
+            "title": document.title,
+            "document_type": document.document_type,
+            "verified": document_fields(session, document)["verified"],
+        }
+        for document in documents
+    ]
+
+
 def subject_view(session: Session, kind: Literal["ship", "organisation"], subject_id: uuid.UUID) -> dict:
     if kind == "ship":
         subject, ship = find_ship(session, subject_id)
-        facts = {"ship_type": ship.ship_type, "organisation_type": None, **built_facts(session, subject_id, ship)}
+        facts = {
+            "ship_type": ship.ship_type,
+            "organisation_type": None,
+            "tonnage": float(ship.tonnage) if ship.tonnage is not None else None,
+            "launched": _uncertain(ship.launched),
+            "fate": ship.fate,
+            "fate_date": _uncertain(ship.fate_date),
+            **built_facts(session, subject_id, ship),
+        }
     else:
         subject, organisation = find_organisation(session, subject_id)
         facts = {
             "ship_type": None,
             "organisation_type": organisation.organisation_type,
+            "tonnage": None,
+            "launched": None,
+            "fate": None,
+            "fate_date": None,
             "builders": [],
             "places": [organisation.place] if organisation.place else [],
             "year_from": None,
@@ -143,6 +230,8 @@ def subject_view(session: Session, kind: Literal["ship", "organisation"], subjec
             for name in names_of(session, subject.id)
         ],
         **facts,
+        "relations": relations_of(session, subject.id),
+        "documents": linked_documents(session, subject.id),
     }
 
 

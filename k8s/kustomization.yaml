@@ -33,12 +33,12 @@ configMapGenerator:
 # One version tag per slice; every custom image is pinned to it and never uses latest.
 images:
   - name: kiwijos/ship-archive-catalog-api
-    newTag: 0.6.0
+    newTag: 0.7.0
   - name: kiwijos/ship-archive-transcribe-worker
-    newTag: 0.6.0
+    newTag: 0.7.0
   - name: kiwijos/ship-archive-web-ui
-    newTag: 0.6.0
+    newTag: 0.7.0
   - name: kiwijos/ship-archive-indexer
-    newTag: 0.6.0
+    newTag: 0.7.0
   - name: kiwijos/ship-archive-search-api
-    newTag: 0.6.0
+    newTag: 0.7.0

@@ -287,6 +287,21 @@ search_for /subjects "any(.hits[]; .id == \"$ship\" and .builders == [\"Yard $ru
 search_for /documents "any(.hits[]; .id == \"$document\")" 30 --data-urlencode "q=$run" --data-urlencode "builder=Yard $run" --data-urlencode place=Lindholmen \
   || fail "the document was not found by the builder and place of the ship it shows"
 
+# Landing pages: every record has an open page of its own, read from the index with no token.
+sister=$(api POST /ships "{\"name\":\"Sister $run\"}" | jq -r .id)
+api POST /relations "{\"from_subject_id\":\"$sister\",\"predicate\":\"rebuilt_from\",\"to_subject_id\":\"$ship\",\"date\":{\"date_text\":\"1912\"}}" >/dev/null \
+  || fail "recording the rebuild failed"
+search_for "/documents/$document" '.verified == true and .image_count == 2 and (.images | map(.rights) == ["PDM", "reserved"]) and (.images[0].verified and .images[0].text_source == "human") and (.images[0].text | contains("Göteborg")) and any(.subjects[]; .id == "'"$ship"'" and .role == "depicted")' 30 \
+  || fail "the Document's landing record is missing its rights, verified state, text or subjects"
+search_for "/subjects/$ship" '.entity == "ship" and .name == "Nordstjernan" and (.names | map(.name) | sort == ["Nordstjernan", "Sofia", "Vega '"$run"'"]) and any(.relations[]; .predicate == "built_by" and .direction == "from" and .other_name == "Yard '"$run"'") and any(.relations[]; .predicate == "rebuilt_from" and .direction == "to" and .other_id == "'"$sister"'") and any(.documents[]; .id == "'"$document"'" and .verified == true)' 30 \
+  || fail "the Ship's landing record is missing its names, relations or documents"
+search_for "/subjects/$sister" 'any(.relations[]; .predicate == "rebuilt_from" and .direction == "from" and .other_id == "'"$ship"'" and .date_text == "1912")' 30 \
+  || fail "the rebuilt Ship does not link back to the old one"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/search/documents/$ship")" = 404 ] || fail "a Ship was served as a Document"
+for page in "ships/$ship" "documents/$document" "ships/$sister"; do
+  [ "$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "$BASE_URL/$page")" = "200 text/html" ] || fail "the address /$page does not give the app, so reload and sharing would break"
+done
+
 # A deleted record leaves the index.
 doomed=$(api POST /ships "{\"name\":\"Doomed $run\"}" | jq -r .id)
 search_for /subjects "any(.hits[]; .id == \"$doomed\")" 30 --data-urlencode "q=Doomed $run" || fail "the new ship never reached search"
@@ -300,4 +315,4 @@ first_cache=$(curl -sG -D - -o /dev/null "$BASE_URL/api/search/documents" --data
 second_cache=$(curl -sG -D - -o /dev/null "$BASE_URL/api/search/documents" --data-urlencode "q=$cache_probe" | tr -d '\r' | awk -F': ' 'tolower($1) == "x-cache" {print $2}')
 [ "$first_cache,$second_cache" = "MISS,HIT" ] || fail "repeated queries were not cached: $first_cache,$second_cache"
 
-echo "SMOKE OK: ship $id created and read back as $staff_name; renames, sale, rebuild, validation and delete verified; Image uploaded to Garage, duplicate flagged, link read back, download address works and expires, key rights verified; page read automatically at $accuracy accuracy, corrupt image failed into the dead-letter queue, re-read works; page added, scan served, correction verified and kept beside the readings, review queue counts right, web UI served with deep links; search finds the corrected document verified, the unverified one only by default, a ship by its old name, builder and year from Relations, deletes leave the index, page size capped, cache hits"
+echo "SMOKE OK: ship $id created and read back as $staff_name; renames, sale, rebuild, validation and delete verified; Image uploaded to Garage, duplicate flagged, link read back, download address works and expires, key rights verified; page read automatically at $accuracy accuracy, corrupt image failed into the dead-letter queue, re-read works; page added, scan served, correction verified and kept beside the readings, review queue counts right, web UI served with deep links; search finds the corrected document verified, the unverified one only by default, a ship by its old name, builder and year from Relations, deletes leave the index, page size capped, cache hits; open landing records for a Document and for two Ships, with rights, verified state, names, relations and a rebuilt-from link, and their addresses reload"

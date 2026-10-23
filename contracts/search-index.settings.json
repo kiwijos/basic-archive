@@ -26,7 +26,8 @@
       "places",
       "year_from",
       "year_to",
-      "document_type"
+      "document_type",
+      "id"
     ],
     "sortableAttributes": [
       "year_from",
@@ -162,7 +163,8 @@
       "builders",
       "places",
       "year_from",
-      "year_to"
+      "year_to",
+      "id"
     ],
     "sortableAttributes": [
       "year_from",

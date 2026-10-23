@@ -3,88 +3,417 @@
   "$id": "https://github.com/kiwijos/basic-archive/contracts/index.view.schema.json",
   "title": "index.view",
   "description": "What catalog-api tells the indexer about one record, ready to be put in the search index.",
-  "oneOf": [{ "$ref": "#/$defs/document" }, { "$ref": "#/$defs/subject" }],
+  "oneOf": [
+    {
+      "$ref": "#/$defs/document"
+    },
+    {
+      "$ref": "#/$defs/subject"
+    }
+  ],
   "$defs": {
     "uuid": {
       "type": "string",
       "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
     },
-    "year": { "type": ["integer", "null"], "minimum": 1, "maximum": 9999 },
-    "strings": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-    "nullableString": { "type": ["string", "null"] },
+    "year": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 9999
+    },
+    "strings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "nullableString": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "document": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "entity", "id", "title", "document_type", "description", "physical_location", "date_text",
-        "year_from", "year_to", "text", "verified", "verified_images", "image_count", "images",
-        "ship_names", "ship_types", "builders", "places"
+        "entity",
+        "id",
+        "title",
+        "document_type",
+        "description",
+        "physical_location",
+        "date_text",
+        "year_from",
+        "year_to",
+        "text",
+        "verified",
+        "verified_images",
+        "image_count",
+        "images",
+        "ship_names",
+        "ship_types",
+        "builders",
+        "places",
+        "subjects"
       ],
       "properties": {
-        "entity": { "const": "document" },
-        "id": { "$ref": "#/$defs/uuid" },
-        "title": { "type": "string" },
-        "document_type": { "$ref": "#/$defs/nullableString" },
-        "description": { "$ref": "#/$defs/nullableString" },
-        "physical_location": { "$ref": "#/$defs/nullableString" },
-        "date_text": { "$ref": "#/$defs/nullableString" },
-        "year_from": { "$ref": "#/$defs/year" },
-        "year_to": { "$ref": "#/$defs/year" },
-        "text": { "type": "string" },
-        "verified": { "type": "boolean" },
-        "verified_images": { "type": "integer", "minimum": 0 },
-        "image_count": { "type": "integer", "minimum": 0 },
+        "entity": {
+          "const": "document"
+        },
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string"
+        },
+        "document_type": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "description": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "physical_location": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "date_text": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "year_from": {
+          "$ref": "#/$defs/year"
+        },
+        "year_to": {
+          "$ref": "#/$defs/year"
+        },
+        "text": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "verified_images": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "image_count": {
+          "type": "integer",
+          "minimum": 0
+        },
         "images": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "page_no"],
+            "required": [
+              "id",
+              "page_no",
+              "mime",
+              "rights",
+              "verified",
+              "text_source",
+              "text"
+            ],
             "properties": {
-              "id": { "$ref": "#/$defs/uuid" },
-              "page_no": { "type": "integer", "minimum": 1 }
+              "id": {
+                "$ref": "#/$defs/uuid"
+              },
+              "page_no": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "mime": {
+                "type": "string"
+              },
+              "rights": {
+                "enum": [
+                  "CC0",
+                  "PDM",
+                  "CC BY",
+                  "reserved"
+                ]
+              },
+              "verified": {
+                "type": "boolean"
+              },
+              "text_source": {
+                "enum": [
+                  "human",
+                  "machine",
+                  null
+                ]
+              },
+              "text": {
+                "type": "string"
+              }
             }
           }
         },
-        "ship_names": { "$ref": "#/$defs/strings" },
-        "ship_types": { "$ref": "#/$defs/strings" },
-        "builders": { "$ref": "#/$defs/strings" },
-        "places": { "$ref": "#/$defs/strings" }
+        "ship_names": {
+          "$ref": "#/$defs/strings"
+        },
+        "ship_types": {
+          "$ref": "#/$defs/strings"
+        },
+        "builders": {
+          "$ref": "#/$defs/strings"
+        },
+        "places": {
+          "$ref": "#/$defs/strings"
+        },
+        "subjects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "kind",
+              "name",
+              "role"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/uuid"
+              },
+              "kind": {
+                "enum": [
+                  "ship",
+                  "organisation"
+                ]
+              },
+              "name": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "role": {
+                "$ref": "#/$defs/nullableString"
+              }
+            }
+          }
+        }
       }
     },
     "subject": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "entity", "id", "name", "names", "ship_type", "organisation_type", "builders", "places",
-        "year_from", "year_to"
+        "entity",
+        "id",
+        "name",
+        "names",
+        "ship_type",
+        "organisation_type",
+        "builders",
+        "places",
+        "year_from",
+        "year_to",
+        "tonnage",
+        "launched",
+        "fate",
+        "fate_date",
+        "relations",
+        "documents"
       ],
       "properties": {
-        "entity": { "enum": ["ship", "organisation"] },
-        "id": { "$ref": "#/$defs/uuid" },
-        "name": { "$ref": "#/$defs/nullableString" },
+        "entity": {
+          "enum": [
+            "ship",
+            "organisation"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "$ref": "#/$defs/nullableString"
+        },
         "names": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "name_type", "date_text", "date_from", "date_to", "current"],
+            "required": [
+              "name",
+              "name_type",
+              "date_text",
+              "date_from",
+              "date_to",
+              "current"
+            ],
             "properties": {
-              "name": { "type": "string", "minLength": 1 },
-              "name_type": { "enum": ["given", "alias"] },
-              "date_text": { "$ref": "#/$defs/nullableString" },
-              "date_from": { "$ref": "#/$defs/nullableString" },
-              "date_to": { "$ref": "#/$defs/nullableString" },
-              "current": { "type": "boolean" }
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name_type": {
+                "enum": [
+                  "given",
+                  "alias"
+                ]
+              },
+              "date_text": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "date_from": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "date_to": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "current": {
+                "type": "boolean"
+              }
             }
           }
         },
-        "ship_type": { "$ref": "#/$defs/nullableString" },
-        "organisation_type": { "$ref": "#/$defs/nullableString" },
-        "builders": { "$ref": "#/$defs/strings" },
-        "places": { "$ref": "#/$defs/strings" },
-        "year_from": { "$ref": "#/$defs/year" },
-        "year_to": { "$ref": "#/$defs/year" }
+        "ship_type": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "organisation_type": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "builders": {
+          "$ref": "#/$defs/strings"
+        },
+        "places": {
+          "$ref": "#/$defs/strings"
+        },
+        "year_from": {
+          "$ref": "#/$defs/year"
+        },
+        "year_to": {
+          "$ref": "#/$defs/year"
+        },
+        "tonnage": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "launched": {
+          "$ref": "#/$defs/uncertainDate"
+        },
+        "fate": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "fate_date": {
+          "$ref": "#/$defs/uncertainDate"
+        },
+        "relations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "predicate",
+              "direction",
+              "other_id",
+              "other_kind",
+              "other_name",
+              "place",
+              "date_text",
+              "date_from",
+              "date_to",
+              "source"
+            ],
+            "properties": {
+              "predicate": {
+                "enum": [
+                  "built_by",
+                  "owned_by",
+                  "operated_by",
+                  "rebuilt_from"
+                ]
+              },
+              "direction": {
+                "enum": [
+                  "from",
+                  "to"
+                ]
+              },
+              "other_id": {
+                "$ref": "#/$defs/uuid"
+              },
+              "other_kind": {
+                "enum": [
+                  "ship",
+                  "organisation"
+                ]
+              },
+              "other_name": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "place": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "date_text": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "date_from": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "date_to": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "source": {
+                "$ref": "#/$defs/nullableString"
+              }
+            }
+          }
+        },
+        "documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "title",
+              "document_type",
+              "verified"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/uuid"
+              },
+              "title": {
+                "type": "string"
+              },
+              "document_type": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "verified": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "uncertainDate": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "date_text",
+        "date_from",
+        "date_to"
+      ],
+      "properties": {
+        "date_text": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "date_from": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "date_to": {
+          "$ref": "#/$defs/nullableString"
+        }
       }
     }
   }

@@ -1,4 +1,4 @@
-import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
@@ -9,7 +9,7 @@ from pydantic import StringConstraints
 from search_api import results
 from search_api.cache import TtlCache
 from search_api.meili import Meili, SearchUnavailable
-from search_api.query import Search
+from search_api.query import Search, quote
 from search_api.ratelimit import RateLimiter
 from search_api.settings import Settings
 
@@ -144,6 +144,20 @@ def create_app(settings: Settings) -> FastAPI:
         page_size: Annotated[int | None, Query(ge=1)] = None,
     ) -> dict:
         return await run(subject_search(q, kind, ship_type, builder, place, year_from, year_to, page, page_size))
+
+    async def landing(index: str, record_id: uuid.UUID) -> dict:
+        found = await meili.search(index, {"q": "", "filter": [f"id = {quote(str(record_id))}"], "limit": 1})
+        if not found["hits"]:
+            raise HTTPException(status_code=404, detail="Not found")
+        return found["hits"][0]
+
+    @app.get("/api/search/documents/{document_id}")
+    async def document_page(document_id: uuid.UUID) -> dict:
+        return results.document_landing(await landing("documents", document_id), settings.iiif_base_url)
+
+    @app.get("/api/search/subjects/{subject_id}")
+    async def subject_page(subject_id: uuid.UUID) -> dict:
+        return results.subject_landing(await landing("subjects", subject_id))
 
     @app.get("/api/search/suggest")
     async def suggest(q: Annotated[str, Query(max_length=100)] = "") -> dict:

@@ -1,8 +1,10 @@
-import { createApi } from "./api.js";
+import { createApi, createSearchApi } from "./api.js";
 import { h } from "./dom.js";
 import { parseRoute, pathFor } from "./router.js";
 import { session } from "./session.js";
 import { link } from "./widgets.js";
+import { recordView } from "./views/record.js";
+import { searchView } from "./views/search.js";
 import { queueView } from "./views/queue.js";
 import { reviewView } from "./views/review.js";
 import { signInView } from "./views/sign-in.js";
@@ -20,8 +22,10 @@ function navigate(path, { replace = false } = {}) {
 
 function signOut() {
   session.signOut();
-  navigate(pathFor("home"));
+  navigate(pathFor("search"));
 }
+
+const searchApi = createSearchApi({ fetch: (...args) => fetch(...args) });
 
 const api = createApi({
   fetch: (...args) => fetch(...args),
@@ -38,8 +42,11 @@ function renderBar() {
     h(
       "nav",
       { "aria-label": "Main" },
-      h("strong", {}, "Ship Archive"),
-      signedIn ? [link(navigate, pathFor("queue"), "Review queue"), link(navigate, pathFor("upload"), "Upload")] : null,
+      link(navigate, pathFor("search"), "Ship Archive"),
+      link(navigate, pathFor("search"), "Search"),
+      signedIn
+        ? [link(navigate, pathFor("queue"), "Review queue"), link(navigate, pathFor("upload"), "Upload")]
+        : link(navigate, pathFor("queue"), "Staff sign-in"),
       signedIn
         ? h("span", { class: "who" }, `Signed in as ${session.name()} `, h("button", { type: "button", onclick: signOut }, "Sign out"))
         : null,
@@ -47,24 +54,18 @@ function renderBar() {
   );
 }
 
-function homeView() {
-  return {
-    title: "Ship Archive",
-    element: h(
-      "section",
-      {},
-      h("h1", {}, "Ship Archive"),
-      h("p", {}, "Review and correct the text of scanned ship documents."),
-      h("ul", {}, h("li", {}, link(navigate, pathFor("queue"), "Open the review queue")), h("li", {}, link(navigate, pathFor("upload"), "Upload a scan"))),
-    ),
-  };
-}
-
 function notFoundView() {
   return {
     title: "Not found",
-    element: h("section", {}, h("h1", {}, "Page not found"), h("p", {}, link(navigate, pathFor("home"), "Go to the start page"))),
+    element: h("section", {}, h("h1", {}, "Page not found"), h("p", {}, link(navigate, pathFor("search"), "Search the archive"))),
   };
+}
+
+// Searching and every record's own page are open to everyone; only the staff pages ask for a token.
+const STAFF_PAGES = new Set(["queue", "upload", "review"]);
+
+function setTitle(text) {
+  document.title = `${text} · Ship Archive`;
 }
 
 function render() {
@@ -73,7 +74,7 @@ function render() {
   renderBar();
 
   let view;
-  if (!session.token() && route.name !== "notFound") {
+  if (STAFF_PAGES.has(route.name) && !session.token()) {
     view = signInView({
       api,
       session,
@@ -84,14 +85,15 @@ function render() {
         else render();
       },
     });
-  } else if (route.name === "home") view = homeView();
+  } else if (route.name === "search") view = searchView({ api: searchApi, navigate, setTitle });
+  else if (["ship", "organisation", "document"].includes(route.name)) view = recordView({ api: searchApi, navigate, setTitle, kind: route.name, id: route.params.id });
   else if (route.name === "queue") view = queueView({ api, navigate });
   else if (route.name === "upload") view = uploadView({ api, navigate });
   else if (route.name === "review") view = reviewView({ api, navigate, documentId: route.params.documentId });
   else view = notFoundView();
 
   current = view;
-  document.title = `${view.title} · Ship Archive`;
+  setTitle(view.title);
   main.replaceChildren(view.element);
   (view.focus ?? main).focus();
 }

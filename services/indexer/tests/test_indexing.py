@@ -151,3 +151,32 @@ def test_the_indexer_waits_for_meilisearch_to_be_ready_instead_of_crashing(start
     assert indexer.alive()
     assert indexer.http.get("/healthz").status_code == 200
     assert indexer.http.get("/readyz").status_code == 503
+
+
+def test_what_a_landing_page_shows_is_stored_with_the_record(indexer, catalog, broker, meili):
+    ship = support.ship(name="Nordstjernan")
+    other = support.ship(name="Skrovet")
+    relation = {"predicate": "rebuilt_from", "direction": "from", "other_id": other["id"], "other_kind": "ship", "other_name": "Skrovet", "place": None, "date_text": "1899", "date_from": None, "date_to": None, "source": None}
+    ship.update(
+        relations=[relation],
+        documents=[{"id": support.new_id(), "title": "Ritning", "document_type": None, "verified": True}],
+        tonnage=1200.5,
+        launched={"date_text": "1890", "date_from": None, "date_to": None},
+        fate="wrecked",
+    )
+    ship = catalog.put(ship)
+    document = catalog.put(
+        support.document(subjects=[{"id": ship["id"], "kind": "ship", "name": "Nordstjernan", "role": "depicted"}])
+    )
+
+    publish(broker, event("ship", ship["id"]))
+    publish(broker, event("document", document["id"]))
+
+    assert wait_until(lambda: ship["id"] in meili.documents("subjects") and document["id"] in meili.documents("documents")), indexer.log()
+    stored = meili.documents("subjects")[ship["id"]]
+    assert stored["relations"] == [relation]
+    assert stored["documents"] == ship["documents"]
+    assert (stored["tonnage"], stored["launched"]["date_text"], stored["fate"]) == (1200.5, "1890", "wrecked")
+    page = meili.documents("documents")[document["id"]]
+    assert page["subjects"][0]["name"] == "Nordstjernan"
+    assert page["images"][0]["rights"] == "reserved" and page["images"][0]["text"]

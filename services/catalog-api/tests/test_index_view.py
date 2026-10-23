@@ -256,3 +256,82 @@ def test_a_ship_with_only_a_written_date_has_no_years(client, staff):
     view = subject_view(client, "ship", ship).json()
 
     assert (view["year_from"], view["year_to"]) == (None, None)
+
+
+def test_a_documents_view_carries_what_its_landing_page_shows_for_each_image(client, staff):
+    from test_pages import JPEG, add_page
+
+    document = upload(client, staff, title="Kontrakt", rights="CC BY").json()
+    first = document["images"][0]["id"]
+    second = add_page(client, staff, document["id"], JPEG, rights="reserved").json()["images"][1]["id"]
+    read_by_machine(client, first, "maskinläst ett")
+    correct(client, staff, second, "rättat två")
+
+    images = document_view(client, document["id"]).json()["images"]
+
+    assert [(i["page_no"], i["rights"], i["verified"], i["text_source"], i["text"]) for i in images] == [
+        (1, "CC BY", False, "machine", "maskinläst ett"),
+        (2, "reserved", True, "human", "rättat två"),
+    ]
+    assert images[0]["id"] == first and images[1]["mime"] == "image/jpeg"
+
+
+def test_a_documents_view_lists_the_live_subjects_it_is_linked_to(client, staff, yard):
+    document = upload(client, staff).json()["id"]
+    link(client, staff, document, yard["ship"])
+    link(client, staff, document, yard["organisation"])
+
+    subjects = document_view(client, document).json()["subjects"]
+
+    assert sorted((s["kind"], s["name"], s["id"]) for s in subjects) == sorted(
+        [("ship", "Nordstjernan", yard["ship"]), ("organisation", "Götaverken", yard["organisation"])]
+    )
+    client.delete(f"{API}/ships/{yard['ship']}", headers=staff)
+    assert [s["kind"] for s in document_view(client, document).json()["subjects"]] == ["organisation"]
+
+
+def test_a_ships_view_carries_its_facts_relations_in_both_directions_and_its_documents(client, staff, yard):
+    old_hull = client.post(f"{API}/ships", json={"name": "Skrovet"}, headers=staff).json()["id"]
+    client.post(f"{API}/relations", json={"from_subject_id": yard["ship"], "predicate": "rebuilt_from", "to_subject_id": old_hull, "date": {"date_text": "1899"}}, headers=staff)
+    client.put(f"{API}/ships/{yard['ship']}", json={"ship_type": "barque", "tonnage": 1200, "fate": "wrecked", "fate_date": {"date_text": "1923"}, "launched": {"date_text": "1890"}}, headers=staff)
+    document = upload(client, staff, title="Ritning").json()
+    correct(client, staff, document["images"][0]["id"], "text")
+    link(client, staff, document["id"], yard["ship"])
+
+    view = subject_view(client, "ship", yard["ship"]).json()
+    old = subject_view(client, "ship", old_hull).json()
+
+    relations = {(r["predicate"], r["direction"], r["other_name"], r["other_kind"]) for r in view["relations"]}
+    assert relations == {("built_by", "from", "Götaverken", "organisation"), ("rebuilt_from", "from", "Skrovet", "ship")}
+    assert [(r["predicate"], r["direction"], r["other_name"]) for r in old["relations"]] == [("rebuilt_from", "to", "Nordstjernan")]
+    rebuilt = next(r for r in view["relations"] if r["predicate"] == "rebuilt_from")
+    assert (rebuilt["other_id"], rebuilt["date_text"]) == (old_hull, "1899")
+    assert (view["tonnage"], view["fate"], view["fate_date"]["date_text"], view["launched"]["date_text"]) == (1200, "wrecked", "1923", "1890")
+    assert view["documents"] == [{"id": document["id"], "title": "Ritning", "document_type": None, "verified": True}]
+    assert subject_view(client, "organisation", yard["organisation"]).json()["relations"][0]["direction"] == "to"
+
+
+def test_a_deleted_subject_leaves_the_relations_and_documents_of_the_others(client, staff, yard):
+    document = upload(client, staff).json()["id"]
+    link(client, staff, document, yard["ship"])
+    client.delete(f"{API}/organisations/{yard['organisation']}", headers=staff)
+
+    view = subject_view(client, "ship", yard["ship"]).json()
+
+    assert view["relations"] == []
+    assert [d["id"] for d in view["documents"]] == [document]
+
+
+def test_what_a_landing_page_shows_is_announced_again_when_it_changes(client, staff, yard, outbox):
+    other = client.post(f"{API}/ships", json={"name": "Skrovet"}, headers=staff).json()["id"]
+    client.post(f"{API}/relations", json={"from_subject_id": yard["ship"], "predicate": "rebuilt_from", "to_subject_id": other}, headers=staff)
+    document = upload(client, staff).json()
+    link(client, staff, document["id"], yard["ship"])
+
+    before = len(outbox())
+    client.post(f"{API}/subjects/{yard['ship']}/names", json={"name": "Freja", "date": {"date_from": "1930-01-01"}}, headers=staff)
+    assert ("ship", other, "upsert") in outbox()[before:]  # it names this ship in its relations
+
+    before = len(outbox())
+    correct(client, staff, document["images"][0]["id"], "text")
+    assert ("ship", yard["ship"], "upsert") in outbox()[before:]  # it lists the Document and whether it is verified
