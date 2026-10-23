@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kiwijos/basic-archive/contracts/record.changed.schema.json",
+  "title": "record.changed",
+  "description": "A record was created, changed or deleted, so anything derived from it must be rebuilt.",
+  "type": "object",
+  "required": ["entity", "id", "op"],
+  "additionalProperties": false,
+  "properties": {
+    "entity": {
+      "enum": ["document", "ship", "organisation"]
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "op": {
+      "enum": ["upsert", "delete"]
+    }
+  }
+}

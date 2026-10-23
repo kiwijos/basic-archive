@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kiwijos/basic-archive/contracts/ocr.requested.schema.json",
+  "title": "ocr.requested",
+  "description": "Asks transcribe-worker to read the text of one Image. attempt counts tries of this job, starting at 1.",
+  "type": "object",
+  "required": ["image_id", "attempt"],
+  "additionalProperties": false,
+  "properties": {
+    "image_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    }
+  }
+}

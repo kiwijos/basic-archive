@@ -74,4 +74,47 @@ if missing cantaloupe-s3; then
   create_s3_secret cantaloupe-s3
 fi
 
+# The broker has one login for now, used by catalog-api and the worker; separate users per service
+# are part of the security hardening. The worker acts on the API with a token of its own.
+if missing rabbitmq-credentials; then
+  BROKER_PASSWORD=$(random)
+  WORKER_TOKEN=$(random)
+  BROKER_URL="amqp://archive:${BROKER_PASSWORD}@rabbitmq:5672/%2F"
+  kubectl -n "$NAMESPACE" create -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rabbitmq-credentials
+type: Opaque
+stringData:
+  RABBITMQ_DEFAULT_USER: "archive"
+  RABBITMQ_DEFAULT_PASS: "$BROKER_PASSWORD"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: catalog-api-amqp
+type: Opaque
+stringData:
+  RABBITMQ_URL: "$BROKER_URL"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: catalog-api-service-tokens
+type: Opaque
+stringData:
+  SERVICE_TOKENS: "transcribe-worker=$WORKER_TOKEN"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: transcribe-worker-env
+type: Opaque
+stringData:
+  RABBITMQ_URL: "$BROKER_URL"
+  CATALOG_API_TOKEN: "$WORKER_TOKEN"
+EOF
+fi
+
 echo "Secrets are in place."

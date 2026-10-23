@@ -6,26 +6,31 @@ A microservice archive for scanned ship documents. See [GLOSSARY.md](GLOSSARY.md
 
 - Docker Desktop with Kubernetes enabled (at least 12 GB of memory recommended)
 - `kubectl`, `helm`, `uv`, `jq`, `make`
+- To run the worker tests locally: Tesseract with English and Swedish data (`brew install tesseract`, plus `swe.traineddata` from `tessdata_fast` in `~/.cache/tessdata`, or your package manager's Swedish pack)
 
 ## Running on Docker Desktop Kubernetes
 
 ```
 make cluster-tools   # once per cluster: Traefik and metrics-server, versions pinned
 make deploy          # creates Secrets if missing, applies everything, waits for readiness
-make smoke           # exercises the API through the Ingress and the object storage behind it
+make smoke           # exercises the API through the Ingress, Garage, and the OCR worker behind it
+make ocr-parallel    # three workers read ten uploaded pages at once, each exactly once
+make resilience      # restarts RabbitMQ and kills catalog-api at awkward moments
 ```
 
 `make deploy` runs two Jobs each time, both safe to repeat: the database migration, and `garage-init`, which prepares Garage (cluster layout, the `masters` and `derivatives` buckets, one access key per service with only the rights it needs). Garage keeps its data on a 5 Gi volume and runs as a single instance.
 
+Uploading an Image queues an OCR job. catalog-api writes every event to an outbox table in the same transaction as the change, and each replica relays it to RabbitMQ (exchange `archive.events`, queues `ocr.requested` and `record.changed`, each with a dead-letter queue, all declared in `k8s/rabbitmq/definitions.json`). transcribe-worker takes one job at a time, reads the page with Tesseract (Swedish and English), and posts a Machine transcription back. A job is tried three times; after that the Image is marked `failed` and the message waits in `ocr.requested.dead`. Staff can read an Image again with `POST /api/catalog/images/{id}/ocr`. The message formats are JSON Schemas in `contracts/`, checked when an event is written and when a worker receives one.
+
 The app is served on `http://localhost`. `make deploy` generates random Secrets on first run and adds any a newer slice needs; set `STAFF_NAMES="alice bob"` to choose the staff names the tokens belong to. Real Secrets are never committed, see `k8s/secrets.template.yaml` for their shape.
 
-An image rebuilt under a tag that is already deployed is not picked up by `make deploy`, and the cluster node keeps its cached copy too. To use a local rebuild, remove the node's copy and restart: `docker exec desktop-control-plane crictl rmi docker.io/kiwijos/ship-archive-catalog-api:<tag>` then `kubectl -n ship-archive rollout restart deployment/catalog-api`.
+An image rebuilt under a tag that is already deployed is not picked up by `make deploy`, and the cluster node keeps its cached copy too. To use a local rebuild, remove the node's copy and restart: `docker exec desktop-control-plane crictl rmi docker.io/kiwijos/ship-archive-<service>:<tag>` then `kubectl -n ship-archive rollout restart deployment/<service>`. Build from the repository root, for example `docker build -f services/catalog-api/Dockerfile -t kiwijos/ship-archive-catalog-api:<tag> .`, because every image copies `contracts/`.
 
 ## Tests
 
 ```
-make test-db   # throwaway Postgres on port 55432
-make test      # API tests against that Postgres
+make test-db   # throwaway Postgres (port 55432) and RabbitMQ (port 56672)
+make test      # API tests and worker tests against them; the worker tests run real Tesseract
 ```
 
 ## Releasing images

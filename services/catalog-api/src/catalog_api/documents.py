@@ -7,10 +7,10 @@ from pydantic import BaseModel, BeforeValidator, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from catalog_api.auth import staff_name
+from catalog_api.auth import staff_name, staff_or_service_name
 from catalog_api.dates import UncertainDate, present
 from catalog_api.db import get_session
-from catalog_api.events import document_changed
+from catalog_api.events import document_changed, ocr_requested
 from catalog_api.models import Document, DocumentSubject, Image, Subject
 from catalog_api.names import current_name, find_subject
 from catalog_api.settings import Settings
@@ -169,12 +169,12 @@ def find_image(session: Session, image_id: uuid.UUID) -> Image:
     return image
 
 
-@router.get("/images/{image_id}", dependencies=[Depends(staff_name)])
+@router.get("/images/{image_id}", dependencies=[Depends(staff_or_service_name)])
 def read_image(image_id: uuid.UUID, session: Session = Depends(get_session)) -> ImageOut:
     return image_out(find_image(session, image_id))
 
 
-@router.get("/images/{image_id}/download-url", dependencies=[Depends(staff_name)])
+@router.get("/images/{image_id}/download-url", dependencies=[Depends(staff_or_service_name)])
 def download_url(
     image_id: uuid.UUID,
     expires_in: Annotated[int | None, Query(ge=1, le=3600)] = None,
@@ -265,4 +265,5 @@ def upload_document(
     )
     session.flush()
     document_changed(session, document)
+    ocr_requested(session, image_id)
     return UploadOut(**document_fields(session, document), duplicate_of_image_id=duplicate_of)

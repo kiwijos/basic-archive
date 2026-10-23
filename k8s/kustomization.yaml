@@ -4,7 +4,9 @@ resources:
   - namespace.yaml
   - postgres.yaml
   - garage.yaml
+  - rabbitmq.yaml
   - catalog-api.yaml
+  - transcribe-worker.yaml
   - ingress.yaml
 configMapGenerator:
   - name: garage-config
@@ -15,7 +17,13 @@ configMapGenerator:
     namespace: ship-archive
     files:
       - garage/init.py
+  - name: rabbitmq-config
+    namespace: ship-archive
+    files:
+      - rabbitmq/definitions.json
 # One version tag per slice; every custom image is pinned to it and never uses latest.
 images:
   - name: kiwijos/ship-archive-catalog-api
-    newTag: 0.3.0
+    newTag: 0.4.0
+  - name: kiwijos/ship-archive-transcribe-worker
+    newTag: 0.4.0

@@ -1,7 +1,10 @@
+import json
 import socket
+from pathlib import Path
 
 import boto3
 import httpx
+import pika
 import pytest
 from fastapi.testclient import TestClient
 from moto.server import ThreadedMotoServer
@@ -15,6 +18,9 @@ TEST_DATABASE_URL = "postgresql+psycopg://postgres:test@localhost:55432/archive_
 STAFF_TOKENS = "alice=alice-token,bob=bob-token"
 MASTERS_BUCKET = "masters"
 S3_CREDENTIALS = {"aws_access_key_id": "test", "aws_secret_access_key": "test"}
+RABBITMQ_URL = "amqp://guest:guest@localhost:56672/%2F"
+# The same file the cluster's broker loads, so tests and deployment cannot disagree about the topology.
+DEFINITIONS = Path(__file__).resolve().parents[3] / "k8s" / "rabbitmq" / "definitions.json"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -78,6 +84,9 @@ def make_settings(s3_url):
         values = {
             "database_url": TEST_DATABASE_URL,
             "staff_tokens": STAFF_TOKENS,
+            "service_tokens": "transcribe-worker=worker-token",
+            "rabbitmq_url": RABBITMQ_URL,
+            "relay_enabled": False,
             "s3_endpoint_url": s3_url,
             "s3_access_key_id": S3_CREDENTIALS["aws_access_key_id"],
             "s3_secret_access_key": S3_CREDENTIALS["aws_secret_access_key"],
@@ -87,6 +96,24 @@ def make_settings(s3_url):
         return Settings(**{**values, **overrides})
 
     return make
+
+
+@pytest.fixture
+def broker():
+    """A channel to a real RabbitMQ holding the archive's exchanges and queues, emptied for each test."""
+    connection = pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
+    channel = connection.channel()
+    definitions = json.loads(DEFINITIONS.read_text())
+    for queue in definitions["queues"]:
+        channel.queue_delete(queue["name"])
+    for exchange in definitions["exchanges"]:
+        channel.exchange_declare(exchange["name"], exchange["type"], durable=exchange["durable"])
+    for queue in definitions["queues"]:
+        channel.queue_declare(queue["name"], durable=queue["durable"], arguments=queue["arguments"])
+    for binding in definitions["bindings"]:
+        channel.queue_bind(binding["destination"], binding["source"], binding["routing_key"])
+    yield channel
+    connection.close()
 
 
 @pytest.fixture
@@ -116,15 +143,42 @@ def staff():
 
 
 @pytest.fixture
-def outbox(database):
-    """The change events waiting to be published, oldest first, as (entity, id, op)."""
+def events(database):
+    """Everything waiting in the outbox, oldest first, as (event_type, payload)."""
 
-    def read() -> list[tuple[str, str, str]]:
+    def read() -> list[tuple[str, dict]]:
         with database.connect() as connection:
             rows = connection.execute(
                 text("SELECT event_type, payload FROM outbox ORDER BY id")
             ).all()
-        assert {row.event_type for row in rows} <= {"record.changed"}
-        return [(row.payload["entity"], row.payload["id"], row.payload["op"]) for row in rows]
+        return [(row.event_type, row.payload) for row in rows]
+
+    return read
+
+
+@pytest.fixture
+def outbox(events):
+    """The record.changed events waiting to be published, oldest first, as (entity, id, op)."""
+
+    def read() -> list[tuple[str, str, str]]:
+        return [
+            (payload["entity"], payload["id"], payload["op"])
+            for event_type, payload in events()
+            if event_type == "record.changed"
+        ]
+
+    return read
+
+
+@pytest.fixture
+def jobs(events):
+    """The OCR jobs waiting to be published, oldest first, as (image_id, attempt)."""
+
+    def read() -> list[tuple[str, int]]:
+        return [
+            (payload["image_id"], payload["attempt"])
+            for event_type, payload in events()
+            if event_type == "ocr.requested"
+        ]
 
     return read
