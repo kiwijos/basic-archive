@@ -13,6 +13,10 @@ first_pair=$(kubectl -n "$NAMESPACE" get secret catalog-api-secrets \
   -o jsonpath='{.data.STAFF_TOKENS}' | base64 -d | cut -d, -f1)
 staff_name=${first_pair%%=*}
 token=${first_pair#*=}
+# The token travels in a private file read by curl, not on a command line where `ps` would show it.
+auth_header=$(mktemp)
+printf 'Authorization: Bearer %s\n' "$token" > "$auth_header"
+trap 'rm -f "$auth_header" "${scan:-}" "${pdf:-}" "${corrupt:-}"' EXIT
 
 status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/catalog/ships" \
   -H 'Content-Type: application/json' -d '{"name":"Unauthorised"}')
@@ -20,11 +24,11 @@ status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/catalog/s
 
 name="Smoke $(date +%s)"
 created=$(curl -sf -X POST "$BASE_URL/api/catalog/ships" \
-  -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+  -H @"$auth_header" -H 'Content-Type: application/json' \
   -d "{\"name\":\"$name\"}") || fail "creating a Ship through the Ingress failed"
 id=$(echo "$created" | jq -r .id)
 
-read_back=$(curl -sf "$BASE_URL/api/catalog/ships/$id" -H "Authorization: Bearer $token") \
+read_back=$(curl -sf "$BASE_URL/api/catalog/ships/$id" -H @"$auth_header") \
   || fail "reading the Ship back failed"
 [ "$(echo "$read_back" | jq -r .name)" = "$name" ] || fail "name did not round-trip: $read_back"
 [ "$(echo "$read_back" | jq -r .created_by)" = "$staff_name" ] || fail "author not recorded: $read_back"
@@ -32,10 +36,10 @@ read_back=$(curl -sf "$BASE_URL/api/catalog/ships/$id" -H "Authorization: Bearer
 api() { # api METHOD PATH [JSON]: call catalog-api as Staff, fail on any non-2xx answer
   local method=$1 path=$2 body=${3:-}
   if [ -n "$body" ]; then
-    curl -sf -X "$method" "$BASE_URL/api/catalog$path" -H "Authorization: Bearer $token" \
+    curl -sf -X "$method" "$BASE_URL/api/catalog$path" -H @"$auth_header" \
       -H 'Content-Type: application/json' -d "$body"
   else
-    curl -sf -X "$method" "$BASE_URL/api/catalog$path" -H "Authorization: Bearer $token"
+    curl -sf -X "$method" "$BASE_URL/api/catalog$path" -H @"$auth_header"
   fi
 }
 
@@ -65,21 +69,20 @@ api POST /relations "{\"from_subject_id\":\"$rebuilt\",\"predicate\":\"rebuilt_f
 
 # An inverted date range is refused, and a deleted ship disappears.
 status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/catalog/ships" \
-  -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+  -H @"$auth_header" -H 'Content-Type: application/json' \
   -d '{"name":"Inverted","launched":{"date_from":"1891-01-01","date_to":"1889-01-01"}}')
 [ "$status" = 422 ] || fail "an inverted date range returned $status, expected 422"
 api DELETE "/ships/$rebuilt" >/dev/null || fail "deleting a Ship failed"
-status=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/catalog/ships/$rebuilt" -H "Authorization: Bearer $token")
+status=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/catalog/ships/$rebuilt" -H @"$auth_header")
 [ "$status" = 404 ] || fail "a deleted Ship returned $status, expected 404"
 
 # An Image is uploaded, stored in Garage, linked to the ship, and a re-upload is flagged.
 # The page is typed Swedish text, so the OCR further down can be checked against what it says.
 scan=$(mktemp); pdf=$(mktemp); corrupt=$(mktemp)
-trap 'rm -f "$scan" "$pdf" "$corrupt"' EXIT
 expected_text=$(uv run --quiet --no-project --with pillow==11.3.0 python "$(dirname "$0")/make_scan.py" "$scan" "$run") \
   || fail "could not render the test scan (is uv installed?)"
 upload() { # upload FILE_PATH TITLE: print the JSON answer, fail on any non-2xx status
-  curl -sf -X POST "$BASE_URL/api/catalog/documents" -H "Authorization: Bearer $token" \
+  curl -sf -X POST "$BASE_URL/api/catalog/documents" -H @"$auth_header" \
     -F "file=@$1;type=image/png" -F "title=$2" -F document_type=letter -F rights=PDM
 }
 first=$(upload "$scan" "Smoke image $run") || fail "uploading an Image failed"
@@ -92,7 +95,7 @@ second=$(upload "$scan" "Smoke image again $run") || fail "uploading the same Im
 [ "$(echo "$second" | jq -r .duplicate_of_image_id)" = "$image" ] || fail "duplicate not flagged: $second"
 
 printf '%%PDF-1.7 not an image' > "$pdf"
-refusal=$(curl -s -w '\n%{http_code}' -X POST "$BASE_URL/api/catalog/documents" -H "Authorization: Bearer $token" \
+refusal=$(curl -s -w '\n%{http_code}' -X POST "$BASE_URL/api/catalog/documents" -H @"$auth_header" \
   -F "file=@$pdf;filename=scan.jpg;type=image/jpeg" -F "title=Not an image")
 refusal_status=$(echo "$refusal" | tail -1)
 refusal_detail=$(echo "$refusal" | head -1 | jq -r .detail)
@@ -162,15 +165,23 @@ echo "OCR accuracy on the Swedish test page: $accuracy"
 # A corrupt image ends as failed after its bounded attempts, lands in the dead-letter queue, and the
 # worker carries on; reading it again publishes a new job.
 dead_letters() { kubectl -n "$NAMESPACE" exec rabbitmq-0 -- rabbitmqctl -q list_queues name messages | awk '$1 == "ocr.requested.dead" {print $2}'; }
+wait_for_dead_letters() { # wait_for_dead_letters COUNT SECONDS: the Image is marked failed just before its message is dead-lettered
+  local deadline=$((SECONDS + $2))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    [ "$(dead_letters)" = "$1" ] && return 0
+    sleep 1
+  done
+  return 1
+}
 worker_restarts() { kubectl -n "$NAMESPACE" get pods -l app=transcribe-worker -o jsonpath='{.items[*].status.containerStatuses[0].restartCount}' | tr ' ' '\n' | awk '{s += $1} END {print s + 0}'; }
 dead_before=$(dead_letters); restarts_before=$(worker_restarts)
 printf '\x89PNG\r\n\x1a\n this is not really a png' > "$corrupt"
 broken=$(upload "$corrupt" "Corrupt image $run" | jq -r '.images[0].id') || fail "uploading the corrupt image failed"
 wait_for_status "$broken" failed 120 || fail "the corrupt Image never reached failed"
-[ "$(dead_letters)" = "$((dead_before + 1))" ] || fail "the corrupt job is not in the dead-letter queue"
+wait_for_dead_letters "$((dead_before + 1))" 30 || fail "the corrupt job is not in the dead-letter queue"
 api POST "/images/$broken/ocr" >/dev/null || fail "reading the failed Image again was refused"
 wait_for_status "$broken" failed 120 || fail "the re-run corrupt Image never reached failed again"
-[ "$(dead_letters)" = "$((dead_before + 2))" ] || fail "reading again did not publish a new job"
+wait_for_dead_letters "$((dead_before + 2))" 30 || fail "reading again did not publish a new job"
 [ "$(worker_restarts)" = "$restarts_before" ] || fail "the worker restarted while handling a corrupt image"
 
 # A finished Image can be read again; both Machine transcriptions are kept.

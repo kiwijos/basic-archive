@@ -1,3 +1,4 @@
+import difflib
 import io
 import json
 import time
@@ -22,8 +23,9 @@ def scan(lines=LINES, size=(1900, 320), font_size=56, fmt="PNG") -> bytes:
     return out.getvalue()
 
 
-def words(text: str) -> list[str]:
-    return text.split()
+def similarity(expected: str, actual: str) -> float:
+    """How alike two texts are, ignoring line breaks and spacing; engine versions differ in small ways."""
+    return difflib.SequenceMatcher(None, " ".join(expected.split()), " ".join(actual.split())).ratio()
 
 
 def wait_until(condition, timeout=20.0, interval=0.05):

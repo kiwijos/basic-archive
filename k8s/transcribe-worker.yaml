@@ -13,7 +13,7 @@ spec:
       labels:
         app: transcribe-worker
     spec:
-      # A job in hand is finished before the pod stops; OCR of a large page can take a while.
+      # A job in hand is finished before the pod stops. OCR is cut off after 90 seconds, so this is enough.
       terminationGracePeriodSeconds: 120
       containers:
         - name: transcribe-worker
@@ -45,10 +45,13 @@ spec:
             limits:
               memory: 1Gi
           securityContext:
+            runAsNonRoot: true
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           # Tesseract and Pillow write temporary files.
           volumeMounts:
             - name: tmp

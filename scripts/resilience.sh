@@ -7,6 +7,7 @@ set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
 restore() {
+  rm -f "$auth_header"
   kubectl -n "$NAMESPACE" scale statefulset/rabbitmq --replicas=1 >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" scale deployment/transcribe-worker --replicas=1 >/dev/null 2>&1 || true
 }

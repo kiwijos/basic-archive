@@ -53,10 +53,11 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.storage = ObjectStorage(settings)
     app.add_middleware(
         UploadGate,
-        names_by_token=settings.names_by_token(),
+        names_by_token=settings.staff_names_by_token(),
         max_upload_bytes=settings.max_upload_bytes,
     )
-    app.state.names_by_token = settings.names_by_token()
+    app.state.staff_names_by_token = settings.staff_names_by_token()
+    app.state.service_names_by_token = settings.service_names_by_token()
     app.state.engine = create_engine(settings.database_url, pool_pre_ping=True)
     app.include_router(health_router)
     app.include_router(ships_router)

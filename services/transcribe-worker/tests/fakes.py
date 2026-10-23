@@ -94,6 +94,7 @@ class FakeCatalog:
         self.results: list[dict] = []
         self.failures: list[dict] = []
         self.downloads: Counter = Counter()
+        self.status_checks: Counter = Counter()
         self.tokens: set[str] = set()
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -141,6 +142,7 @@ class FakeCatalog:
                     return self._send(200, {"url": f"{catalog.url}/files/{image_id}", "expires_in": 300})
                 if match := re.fullmatch(r"/api/catalog/images/([\w-]+)", self.path):
                     image_id = match.group(1)
+                    catalog.status_checks[image_id] += 1
                     if image_id in catalog.unknown:
                         return self._send(404, {"detail": "Image not found"})
                     return self._send(200, {"id": image_id, "review_status": catalog.review_status.get(image_id, "pending")})

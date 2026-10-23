@@ -53,7 +53,8 @@ class OutboxRelay:
                 published = self._publish_batch(channel)
             except Exception as error:
                 logger.warning("Outbox relay could not publish, will retry: %s", error)
-                connection = self._close(connection)
+                self._close(connection)
+                connection = None
                 self._stopping.wait(RECONNECT_PAUSE_SECONDS)
                 continue
             if published == 0:
@@ -67,7 +68,6 @@ class OutboxRelay:
                 connection.close()
         except Exception:
             pass
-        return None
 
     def _publish_batch(self, channel) -> int:
         failure = None

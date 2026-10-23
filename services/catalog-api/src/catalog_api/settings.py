@@ -18,11 +18,18 @@ class Settings(BaseSettings):
     relay_enabled: bool = True
     relay_interval_seconds: float = 0.5
 
-    def names_by_token(self) -> dict[str, str]:
-        names = {}
-        for pairs in (self.staff_tokens, self.service_tokens):
-            for item in pairs.split(","):
-                if "=" in item:
-                    name, token = item.split("=", 1)
-                    names[token.strip()] = name.strip()
-        return names
+    def staff_names_by_token(self) -> dict[str, str]:
+        return _parse_tokens(self.staff_tokens)
+
+    def service_names_by_token(self) -> dict[str, str]:
+        return _parse_tokens(self.service_tokens)
+
+
+def _parse_tokens(pairs: str) -> dict[str, str]:
+    """Turn "name=token,name=token" into {token: name}."""
+    names = {}
+    for item in pairs.split(","):
+        if "=" in item:
+            name, token = item.split("=", 1)
+            names[token.strip()] = name.strip()
+    return names

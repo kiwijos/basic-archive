@@ -169,4 +169,4 @@ def test_ocr_endpoints_need_a_token_and_an_existing_image(client, staff, image):
     assert client.post(f"{API}/images/{image}/transcriptions", json=machine_result()).status_code == 401
     assert client.post(f"{API}/images/{unknown}/ocr", headers=staff).status_code == 404
     assert client.get(f"{API}/images/{unknown}/transcriptions", headers=staff).status_code == 404
-    assert post_result(client, staff, unknown).status_code == 404
+    assert post_result(client, WORKER, unknown).status_code == 404

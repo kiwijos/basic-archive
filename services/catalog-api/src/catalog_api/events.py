@@ -30,6 +30,7 @@ def document_changed(session: Session, document: Document) -> None:
     _changed(session, "document", document.id, "upsert")
 
 
-def ocr_requested(session: Session, image_id: uuid.UUID, attempt: int = 1) -> None:
-    """Queue a job asking transcribe-worker to read this Image."""
-    _enqueue(session, "ocr.requested", {"image_id": str(image_id), "attempt": attempt})
+def ocr_requested(session: Session, image_id: uuid.UUID) -> None:
+    """Queue a job asking transcribe-worker to read this Image. Every job starts at attempt 1;
+    only the worker counts further attempts."""
+    _enqueue(session, "ocr.requested", {"image_id": str(image_id), "attempt": 1})

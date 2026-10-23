@@ -7,13 +7,13 @@ set -euo pipefail
 REPLICAS=3
 COUNT=10
 
+trap 'rm -f "$auth_header" "$ids_file"; kubectl -n "$NAMESPACE" scale deployment/transcribe-worker --replicas=1 >/dev/null' EXIT
+ids_file=$(mktemp)
 kubectl -n "$NAMESPACE" scale deployment/transcribe-worker --replicas=$REPLICAS >/dev/null
-trap 'kubectl -n "$NAMESPACE" scale deployment/transcribe-worker --replicas=1 >/dev/null' EXIT
 kubectl -n "$NAMESPACE" rollout status deployment/transcribe-worker --timeout=180s >/dev/null
 echo "$REPLICAS workers ready; uploading $COUNT pages at once"
 
 run=$(date +%s)
-ids_file=$(mktemp)
 for n in $(seq 1 $COUNT); do
   ( upload_scan "$run-$n" >> "$ids_file" ) &
 done

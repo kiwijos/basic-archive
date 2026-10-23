@@ -3,7 +3,8 @@ import time
 import uuid
 
 import pika
-from support import LINES, job, scan, wait_until
+import pytest
+from support import LINES, job, scan, similarity, wait_until
 
 EXPECTED = " ".join(" ".join(LINES).split())
 
@@ -50,7 +51,7 @@ def test_a_job_is_read_and_its_result_posted_to_catalog_api(catalog, broker, sta
     [result] = catalog.results
     assert result["image_id"] == image_id
     assert result["source"] == "machine"
-    assert " ".join(result["text"].split()) == EXPECTED
+    assert similarity(EXPECTED, result["text"]) >= 0.95
     assert result["engine"] == "tesseract"
     assert result["engine_version"][0].isdigit()
     assert result["language"] == "swe+eng"
@@ -114,10 +115,12 @@ def test_a_message_that_breaks_the_contract_is_dead_lettered_without_touching_ca
     assert worker.alive()
 
 
-def test_a_duplicate_job_is_harmless_when_catalog_api_already_has_the_result(
-    catalog, broker, start_worker
+@pytest.mark.parametrize("status", [409, 404])
+def test_a_duplicate_job_is_harmless_when_the_result_is_not_needed(
+    catalog, broker, start_worker, status
 ):
-    catalog.result_status = 409
+    # 409: catalog-api already has a result. 404: the Image was deleted while the job was running.
+    catalog.result_status = status
     worker = start_worker()
     image_id = str(uuid.uuid4())
     catalog.files[image_id] = scan()
@@ -145,15 +148,16 @@ def test_a_job_for_an_image_that_is_no_longer_pending_is_skipped_without_reading
     publish(broker, job(unknown))
 
     assert wait_until(lambda: waiting(broker, "ocr.requested") == 0), worker.log()
-    assert wait_until(lambda: len(catalog.tokens) == 1)
+    assert wait_until(lambda: set(catalog.status_checks) == {finished, unknown})
     assert catalog.downloads == {}
     assert catalog.results == [] and catalog.failures == []
     assert waiting(broker, "ocr.requested.dead") == 0
 
 
-def test_when_catalog_api_keeps_failing_the_job_is_retried_then_dead_lettered(
+def test_while_catalog_api_cannot_take_the_failure_report_the_job_is_kept_not_abandoned(
     catalog, broker, start_worker
 ):
+    # If the job were dead-lettered now, the Image would stay pending forever and could not be read again.
     catalog.result_status = 500
     catalog.failure_status = 500
     worker = start_worker()
@@ -162,9 +166,12 @@ def test_when_catalog_api_keeps_failing_the_job_is_retried_then_dead_lettered(
 
     publish(broker, job(image_id))
 
+    assert wait_until(lambda: len(catalog.results) >= 3 and len(catalog.failures) >= 1), worker.log()
+    time.sleep(0.5)
+    assert waiting(broker, "ocr.requested.dead") == 0
+    # Once catalog-api can take the report, the Image is marked failed and only then is the job dead-lettered.
+    catalog.failure_status = 200
     assert wait_until(lambda: waiting(broker, "ocr.requested.dead") == 1), worker.log()
-    assert len(catalog.results) == 3  # each attempt got as far as posting its result
-    assert len(catalog.failures) == 1  # reporting the failure was attempted once, and survived failing
     assert worker.alive()
 
 
@@ -179,7 +186,7 @@ def test_a_tiff_and_a_very_large_page_are_read_too(catalog, broker, start_worker
 
     assert wait_until(lambda: len(catalog.results) == 2, timeout=60), worker.log()
     for result in catalog.results:
-        assert " ".join(result["text"].split()) == EXPECTED, result["image_id"]
+        assert similarity(EXPECTED, result["text"]) >= 0.95, result["image_id"]
 
 
 def test_a_page_above_the_pixel_limit_is_refused_instead_of_exhausting_memory(

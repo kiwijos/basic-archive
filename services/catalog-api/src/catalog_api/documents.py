@@ -7,7 +7,7 @@ from pydantic import BaseModel, BeforeValidator, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from catalog_api.auth import staff_name
+from catalog_api.auth import staff_name, staff_or_service_name
 from catalog_api.dates import UncertainDate, present
 from catalog_api.db import get_session
 from catalog_api.events import document_changed, ocr_requested
@@ -169,12 +169,12 @@ def find_image(session: Session, image_id: uuid.UUID) -> Image:
     return image
 
 
-@router.get("/images/{image_id}", dependencies=[Depends(staff_name)])
+@router.get("/images/{image_id}", dependencies=[Depends(staff_or_service_name)])
 def read_image(image_id: uuid.UUID, session: Session = Depends(get_session)) -> ImageOut:
     return image_out(find_image(session, image_id))
 
 
-@router.get("/images/{image_id}/download-url", dependencies=[Depends(staff_name)])
+@router.get("/images/{image_id}/download-url", dependencies=[Depends(staff_or_service_name)])
 def download_url(
     image_id: uuid.UUID,
     expires_in: Annotated[int | None, Query(ge=1, le=3600)] = None,

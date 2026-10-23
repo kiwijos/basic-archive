@@ -9,14 +9,18 @@ fail() { echo "FAILED: $*" >&2; exit 1; }
 # The first staff token, as name=token.
 first_pair=$(kubectl -n "$NAMESPACE" get secret catalog-api-secrets -o jsonpath='{.data.STAFF_TOKENS}' | base64 -d | cut -d, -f1)
 token=${first_pair#*=}
+# The token travels in a private file read by curl, not on a command line where `ps` would show it.
+# Scripts that source this file must not set their own EXIT trap without also removing this file.
+auth_header=$(mktemp)
+printf 'Authorization: Bearer %s\n' "$token" > "$auth_header"
 
 api() { # api METHOD PATH [JSON]: call catalog-api as Staff, fail on any non-2xx answer
   local method=$1 path=$2 body=${3:-}
   if [ -n "$body" ]; then
-    curl -sf -X "$method" "$BASE_URL/api/catalog$path" -H "Authorization: Bearer $token" \
+    curl -sf -X "$method" "$BASE_URL/api/catalog$path" -H @"$auth_header" \
       -H 'Content-Type: application/json' -d "$body"
   else
-    curl -sf -X "$method" "$BASE_URL/api/catalog$path" -H "Authorization: Bearer $token"
+    curl -sf -X "$method" "$BASE_URL/api/catalog$path" -H @"$auth_header"
   fi
 }
 
@@ -24,7 +28,7 @@ upload_scan() { # upload_scan RUN_ID: render a Swedish test page, upload it, pri
   local file
   file=$(mktemp)
   uv run --quiet --no-project --with pillow==11.3.0 python "$SCRIPTS_DIR/make_scan.py" "$file" "$1" >/dev/null
-  curl -sf -X POST "$BASE_URL/api/catalog/documents" -H "Authorization: Bearer $token" \
+  curl -sf -X POST "$BASE_URL/api/catalog/documents" -H @"$auth_header" \
     -F "file=@$file;type=image/png" -F "title=Test page $1" -F document_type=letter | jq -r '.images[0].id'
   rm -f "$file"
 }

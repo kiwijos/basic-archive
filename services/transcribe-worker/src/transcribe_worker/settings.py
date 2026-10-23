@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     retry_backoff_seconds: float = 2.0
 
     ocr_languages: str = "swe+eng"
-    ocr_timeout_seconds: int = 300
+    # Must stay below the pod's termination grace period, so a stopping pod can finish its job.
+    ocr_timeout_seconds: int = 90
     # Large scans are shrunk to this many pixels on the long side, and refused above the pixel limit,
     # so one huge file cannot exhaust the pod's memory.
     max_image_side: int = 3500

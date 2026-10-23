@@ -29,7 +29,8 @@ class CatalogClient:
         return content.content
 
     async def post_result(self, image_id: str, reading: Reading) -> bool:
-        """Record the reading. False means catalog-api already had a result, so the job was a duplicate."""
+        """Record the reading. False means it was not needed: catalog-api already had a result for
+        this job (a duplicate), or the Image has been deleted since the job was queued."""
         response = await self._api.post(
             f"/api/catalog/images/{image_id}/transcriptions",
             json={
@@ -41,7 +42,7 @@ class CatalogClient:
                 "confidence": reading.confidence,
             },
         )
-        if response.status_code == 409:
+        if response.status_code in (404, 409):
             return False
         response.raise_for_status()
         return True

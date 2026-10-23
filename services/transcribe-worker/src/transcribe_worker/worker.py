@@ -82,8 +82,11 @@ class Worker:
                 await self._process(message)
             except Exception:
                 logger.exception("Unexpected error, dead-lettering the message instead of stalling")
-                if not message.processed:
-                    await message.nack(requeue=False)
+                try:
+                    if not message.processed:
+                        await message.nack(requeue=False)
+                except Exception:
+                    logger.exception("Could not settle the message; the broker will redeliver it")
 
     async def _process(self, message: AbstractIncomingMessage) -> None:
         try:
@@ -117,7 +120,7 @@ class Worker:
         if await self._catalog.post_result(image_id, reading):
             logger.info("Image %s read, %d characters", image_id, len(reading.text))
         else:
-            logger.info("Image %s already had a result, this was a duplicate job", image_id)
+            logger.info("Image %s did not need this reading (already read, or deleted)", image_id)
 
     async def _failed(self, message, image_id: str, attempt: int, error: Exception) -> None:
         s = self._settings
@@ -136,7 +139,12 @@ class Worker:
         try:
             await self._catalog.report_failure(image_id, str(error) or type(error).__name__)
         except Exception:
-            logger.exception("Could not report the failure of image %s", image_id)
+            # Dead-lettering now would leave the Image pending for good, and staff cannot read a
+            # pending Image again. Keep the job and try the report again after a pause.
+            logger.exception("Could not report the failure of image %s, keeping the job", image_id)
+            await asyncio.sleep(s.retry_backoff_seconds * 2 ** (s.max_attempts - 1))
+            await message.nack(requeue=True)
+            return
         await message.reject(requeue=False)
 
     async def _publish_next_attempt(self, image_id: str, attempt: int) -> None:

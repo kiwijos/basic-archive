@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from catalog_api.auth import staff_name
+from catalog_api.auth import service_name, staff_name
 from catalog_api.db import get_session
 from catalog_api.documents import find_image
 from catalog_api.events import document_changed, ocr_requested
@@ -77,7 +77,7 @@ def announce_document_of(session: Session, image: Image) -> None:
 def add_machine_transcription(
     image_id: uuid.UUID,
     result: MachineResultIn,
-    author: str = Depends(staff_name),
+    author: str = Depends(service_name),
     session: Session = Depends(get_session),
 ) -> TranscriptionOut:
     image = find_image(session, image_id)
@@ -112,7 +112,7 @@ def read_transcriptions(
     return [transcription_out(row) for row in rows]
 
 
-@router.post("/images/{image_id}/ocr-failure", dependencies=[Depends(staff_name)])
+@router.post("/images/{image_id}/ocr-failure", dependencies=[Depends(service_name)])
 def report_ocr_failure(
     image_id: uuid.UUID, failure: FailureIn, session: Session = Depends(get_session)
 ) -> dict:
