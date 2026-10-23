@@ -49,6 +49,7 @@ class Outbox(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     event_type: Mapped[str] = mapped_column(Text)
     payload: Mapped[dict] = mapped_column(JSONB)
+    published_at: Mapped[datetime | None]
 
 
 class Document(Base):
@@ -76,6 +77,21 @@ class DocumentSubject(Base):
     document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("document.id"), primary_key=True)
     subject_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("subject.id"), primary_key=True)
     role: Mapped[str | None] = mapped_column(Text)
+
+
+class Transcription(Base):
+    __tablename__ = "transcription"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    image_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("image.id"))
+    source: Mapped[str] = mapped_column(Text)
+    text: Mapped[str] = mapped_column(Text)
+    engine: Mapped[str | None] = mapped_column(Text)
+    engine_version: Mapped[str | None] = mapped_column(Text)
+    language: Mapped[str | None] = mapped_column(Text)
+    confidence: Mapped[float | None] = mapped_column(Numeric(4, 3))
+    created_by: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
 class Image(Base):

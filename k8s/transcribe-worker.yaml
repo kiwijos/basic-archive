@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transcribe-worker
+  namespace: ship-archive
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: transcribe-worker
+  template:
+    metadata:
+      labels:
+        app: transcribe-worker
+    spec:
+      # A job in hand is finished before the pod stops; OCR of a large page can take a while.
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: transcribe-worker
+          image: kiwijos/ship-archive-transcribe-worker
+          ports:
+            - name: health
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: transcribe-worker-env
+          env:
+            - name: CATALOG_API_URL
+              value: http://catalog-api:8000
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Tesseract and Pillow write temporary files.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

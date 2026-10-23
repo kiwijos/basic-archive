@@ -1,0 +1,10 @@
+.git
+.github
+.scratch
+docs
+k8s
+scripts
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/tests

@@ -34,6 +34,10 @@ spec:
                 name: catalog-api-secrets
             - secretRef:
                 name: catalog-api-s3
+            - secretRef:
+                name: catalog-api-amqp
+            - secretRef:
+                name: catalog-api-service-tokens
           env:
             - name: S3_ENDPOINT_URL
               value: http://garage:3900

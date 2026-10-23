@@ -1,0 +1,24 @@
+{
+  "exchanges": [
+    {"name": "archive.events", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {}},
+    {"name": "archive.dead", "vhost": "/", "type": "direct", "durable": true, "auto_delete": false, "internal": false, "arguments": {}}
+  ],
+  "queues": [
+    {
+      "name": "ocr.requested", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {"x-dead-letter-exchange": "archive.dead", "x-dead-letter-routing-key": "ocr.requested"}
+    },
+    {"name": "ocr.requested.dead", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {}},
+    {
+      "name": "record.changed", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {"x-dead-letter-exchange": "archive.dead", "x-dead-letter-routing-key": "record.changed"}
+    },
+    {"name": "record.changed.dead", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {}}
+  ],
+  "bindings": [
+    {"source": "archive.events", "vhost": "/", "destination": "ocr.requested", "destination_type": "queue", "routing_key": "ocr.requested", "arguments": {}},
+    {"source": "archive.events", "vhost": "/", "destination": "record.changed", "destination_type": "queue", "routing_key": "record.changed", "arguments": {}},
+    {"source": "archive.dead", "vhost": "/", "destination": "ocr.requested.dead", "destination_type": "queue", "routing_key": "ocr.requested", "arguments": {}},
+    {"source": "archive.dead", "vhost": "/", "destination": "record.changed.dead", "destination_type": "queue", "routing_key": "record.changed", "arguments": {}}
+  ]
+}

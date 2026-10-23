@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: ship-archive
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  namespace: ship-archive
+spec:
+  serviceName: rabbitmq
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:4.3.7-alpine
+          ports:
+            - name: amqp
+              containerPort: 5672
+          envFrom:
+            - secretRef:
+                name: rabbitmq-credentials
+          # The archive's exchanges and queues are imported once the broker is up. Importing is
+          # additive and safe to repeat, so it runs on every start. The hook runs as root, so it
+          # waits for the server to create its own Erlang cookie first: a root-owned cookie
+          # would stop the server (which runs as the rabbitmq user) from reading it.
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - >-
+                    until [ "$(stat -c %U /var/lib/rabbitmq/.erlang.cookie 2>/dev/null)" = rabbitmq ]; do sleep 1; done;
+                    until rabbitmq-diagnostics -q check_running >/dev/null 2>&1; do sleep 2; done;
+                    rabbitmqctl import_definitions /etc/rabbitmq/definitions.json
+          # Ready means running and holding the archive's queues, not merely running.
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - rabbitmq-diagnostics -q check_running && rabbitmqctl -q list_queues name | grep -qx ocr.requested.dead
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 15
+          livenessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 768Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/rabbitmq/definitions.json
+              subPath: definitions.json
+            - name: data
+              mountPath: /var/lib/rabbitmq
+      volumes:
+        - name: config
+          configMap:
+            name: rabbitmq-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
