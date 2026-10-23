@@ -98,3 +98,30 @@ def test_health_checks_are_never_limited_and_readiness_follows_meilisearch(new_c
     assert down.get("/healthz").status_code == 200
     assert down.get("/readyz").status_code == 503
     assert down.get(f"{API}/documents").json() == {"detail": "Search is not available right now"}
+
+
+def test_the_limiter_forgets_the_oldest_client_when_its_table_is_full_instead_of_growing(new_client, meili):
+    client = new_client(rate_limit_per_minute=1, rate_limit_max_clients=3)
+
+    def status(address):
+        return client.get(f"{API}/documents", headers={"X-Forwarded-For": address}).status_code
+
+    assert [status(f"10.0.0.{n}") for n in (1, 2, 3)] == [200, 200, 200]
+    assert status("10.0.0.3") == 429
+    assert status("10.0.0.4") == 200  # a fourth client pushes the oldest, 10.0.0.1, out of the table
+    assert status("10.0.0.3") == 429  # the others are still counted
+    assert status("10.0.0.1") == 200  # the forgotten one starts afresh
+
+
+def test_the_cache_is_bounded_by_size_and_a_body_larger_than_the_budget_is_not_kept(new_client, meili):
+    probe = new_client()
+    size = len(probe.get(f"{API}/documents", params={"q": "q1"}).content)
+
+    tiny = new_client(cache_max_bytes=size - 1)
+    assert [tiny.get(f"{API}/documents", params={"q": "q1"}).headers["X-Cache"] for _ in range(2)] == ["MISS", "MISS"]
+
+    two = new_client(cache_max_bytes=size * 2 + size // 2)
+    for query in ("q1", "q2", "q3"):
+        two.get(f"{API}/documents", params={"q": query})
+    assert two.get(f"{API}/documents", params={"q": "q3"}).headers["X-Cache"] == "HIT"
+    assert two.get(f"{API}/documents", params={"q": "q1"}).headers["X-Cache"] == "MISS"  # evicted to stay in budget

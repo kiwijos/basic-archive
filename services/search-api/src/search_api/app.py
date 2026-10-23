@@ -17,6 +17,7 @@ Text = Annotated[str, Query(max_length=200)]
 Value = Annotated[str, StringConstraints(max_length=100)]
 Values = Annotated[list[Value] | None, Query(max_length=10)]
 Year = Annotated[int | None, Query(ge=1, le=9999)]
+YEAR_FIELDS = ("year_from", "year_to")
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -28,8 +29,8 @@ def create_app(settings: Settings) -> FastAPI:
         await meili.close()
 
     app = FastAPI(title="search-api", lifespan=lifespan)
-    cache = TtlCache(settings.cache_ttl_seconds, settings.cache_max_entries)
-    limiter = RateLimiter(settings.rate_limit_per_minute, settings.rate_limit_window_seconds)
+    cache = TtlCache(settings.cache_ttl_seconds, settings.cache_max_entries, settings.cache_max_bytes)
+    limiter = RateLimiter(settings.rate_limit_per_minute, settings.rate_limit_window_seconds, settings.rate_limit_max_clients)
 
     def client_of(request: Request) -> str:
         """The address the nearest trusted proxy saw; entries before it are whatever the client claimed."""
@@ -90,7 +91,9 @@ def create_app(settings: Settings) -> FastAPI:
             "page_size": search.page_size,
             "total": found.get("totalHits", 0),
             "total_pages": found.get("totalPages", 0),
-            "facets": found.get("facetDistribution", {}),
+            "facets": {k: v for k, v in found.get("facetDistribution", {}).items() if k not in YEAR_FIELDS},
+            # The earliest and latest years on offer, for a year slider, instead of a long list of years.
+            "facet_stats": {k: v for k, v in found.get("facetStats", {}).items() if k in YEAR_FIELDS},
         }
         if hits:
             answer["hits"] = [
@@ -184,6 +187,6 @@ def create_app(settings: Settings) -> FastAPI:
         else:
             search = subject_search(q, kind, ship_type, builder, place, year_from, year_to, 1, 1)
         answer = await run(search, hits=False)
-        return {"scope": scope, "facets": answer["facets"], "total": answer["total"]}
+        return {"scope": scope, "facets": answer["facets"], "facet_stats": answer["facet_stats"], "total": answer["total"]}
 
     return app

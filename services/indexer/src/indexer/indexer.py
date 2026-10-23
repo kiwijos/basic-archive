@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 from indexer.catalog import CatalogClient
 from indexer.contracts import validate
@@ -25,10 +26,11 @@ class Indexer:
     events can arrive twice or out of order and the index still ends up right.
     """
 
-    def __init__(self, catalog: CatalogClient, meili: Meili, page_size: int):
+    def __init__(self, catalog: CatalogClient, meili: Meili, page_size: int, settings_file: Path):
         self._catalog = catalog
         self._meili = meili
         self._page_size = page_size
+        self._settings_file = settings_file
         # One change at a time, and none while a reindex runs, so a reindex's older view of a record
         # can never land after a newer event's.
         self.lock = asyncio.Lock()
@@ -51,6 +53,9 @@ class Indexer:
         state = self.reindexing = ReindexState(state="running")
         try:
             async with self.lock:
+                # Meilisearch may have lost the indexes, and writing to a missing one would create it
+                # with default settings, so make sure each exists and is configured first.
+                await self._meili.prepare(self._settings_file)
                 seen: dict[str, set[str]] = {"documents": set(), "subjects": set()}
                 for entity in ("document", "ship", "organisation"):
                     index = INDEX_OF[entity]

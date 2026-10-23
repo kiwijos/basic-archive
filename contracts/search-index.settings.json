@@ -100,6 +100,24 @@
       ],
       "blueprint": [
         "ritning"
+      ],
+      "fartyget": [
+        "skeppet",
+        "båten"
+      ],
+      "skeppet": [
+        "fartyget",
+        "båten"
+      ],
+      "båten": [
+        "fartyget",
+        "skeppet"
+      ],
+      "varvet": [
+        "skeppsvarvet"
+      ],
+      "skeppsvarvet": [
+        "varvet"
       ]
     },
     "typoTolerance": {
@@ -196,6 +214,24 @@
       ],
       "barque": [
         "bark"
+      ],
+      "fartyget": [
+        "skeppet",
+        "båten"
+      ],
+      "skeppet": [
+        "fartyget",
+        "båten"
+      ],
+      "båten": [
+        "fartyget",
+        "skeppet"
+      ],
+      "varvet": [
+        "skeppsvarvet"
+      ],
+      "skeppsvarvet": [
+        "varvet"
       ]
     },
     "typoTolerance": {

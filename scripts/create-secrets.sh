@@ -140,18 +140,19 @@ EOF
 fi
 
 if missing indexer-env; then
-  INDEXER_TOKEN=$(random)
-  # The indexer reads catalog-api as a service of its own, so catalog-api must accept its token.
+  # The indexer reads catalog-api as a service of its own, so catalog-api must accept its token. If an
+  # earlier run got as far as registering the token but not as far as writing indexer-env, reuse it.
   tokens=$(secret_value catalog-api-service-tokens SERVICE_TOKENS)
-  case ",$tokens," in
-    *,indexer=*) ;;
-    *)
-      printf '%s' "${tokens},indexer=${INDEXER_TOKEN}" | kubectl -n "$NAMESPACE" create secret generic catalog-api-service-tokens \
-        --from-file=SERVICE_TOKENS=/dev/stdin --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-      # Pods read their tokens when they start.
-      kubectl -n "$NAMESPACE" rollout restart deployment/catalog-api >/dev/null 2>&1 || true
-      ;;
-  esac
+  existing=$(printf '%s' "$tokens" | tr ',' '\n' | grep '^indexer=' | head -1 || true)
+  if [ -n "$existing" ]; then
+    INDEXER_TOKEN=${existing#indexer=}
+  else
+    INDEXER_TOKEN=$(random)
+    printf '%s' "${tokens},indexer=${INDEXER_TOKEN}" | kubectl -n "$NAMESPACE" create secret generic catalog-api-service-tokens \
+      --from-file=SERVICE_TOKENS=/dev/stdin --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    # Pods read their tokens when they start.
+    kubectl -n "$NAMESPACE" rollout restart deployment/catalog-api >/dev/null 2>&1 || true
+  fi
   INDEXER_MEILI_KEY=$(secret_value meilisearch-secrets MEILI_MASTER_KEY | meili_key indexer)
   kubectl -n "$NAMESPACE" create -f - <<EOF
 apiVersion: v1

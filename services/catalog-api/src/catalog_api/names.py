@@ -41,12 +41,17 @@ def names_of(session: Session, subject_id: uuid.UUID) -> list[SubjectName]:
     return sorted(names, key=lambda n: (n.date_from or date.min, n.date_to or date.max, n.created_at))
 
 
-def current_name(session: Session, subject_id: uuid.UUID) -> str | None:
+def current_name_row(session: Session, subject_id: uuid.UUID) -> SubjectName | None:
     """The given Name with no end date, or else the one that ended last."""
     names = [n for n in names_of(session, subject_id) if n.name_type == "given"]
     if not names:
         return None
-    return max(names, key=lambda n: (n.date_to or date.max, n.date_from or date.min, n.created_at)).name
+    return max(names, key=lambda n: (n.date_to or date.max, n.date_from or date.min, n.created_at))
+
+
+def current_name(session: Session, subject_id: uuid.UUID) -> str | None:
+    row = current_name_row(session, subject_id)
+    return row.name if row else None
 
 
 def find_subject(session: Session, subject_id: uuid.UUID) -> Subject:

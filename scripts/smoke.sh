@@ -223,7 +223,7 @@ rm -f "$content_headers"
 status=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/catalog/images/$image/content")
 [ "$status" = 401 ] || fail "the scan was served without a token ($status)"
 
-corrected="Skeppet Vega lämnade Göteborg den 14 mars 1891."
+corrected="Skeppet Vega lämnade Göteborg den 14 mars 1891. Ref zebrafink$run"
 api POST "/images/$image/transcriptions" "{\"source\":\"human\",\"text\":\"$corrected\"}" >/dev/null || fail "saving a correction failed"
 api GET "/images/$image" | jq -e --arg text "$corrected" '.verified and .review_status == "verified" and .text_source == "human" and .current_text == $text' >/dev/null \
   || fail "the corrected Image is not verified with the corrected text"
@@ -272,6 +272,10 @@ search_for /documents "any(.hits[]; .id == \"$second_document\") | not" 5 --data
   || fail "the unverified Document is still returned under verified-only"
 search_for /documents "any(.hits[]; .id == \"$document\")" 5 --data-urlencode "q=$run" --data-urlencode page_size=50 --data-urlencode verified_only=true \
   || fail "the verified Document is missing under verified-only"
+
+# The words of the correction are what is searched, and the answer highlights them.
+search_for /documents "any(.hits[]; .id == \"$document\" and any(.highlights.text[]; .match and (.text | ascii_downcase | contains(\"zebrafink$run\"))))" 30 \
+  --data-urlencode "q=zebrafink$run" || fail "the corrected text was not searchable"
 
 # A ship is found by an old name, and the answer says which name matched.
 search_for /subjects "any(.hits[]; .id == \"$ship\" and .name == \"Nordstjernan\" and .matched_name == \"Vega $run\")" 30 --data-urlencode "q=Vega $run" \

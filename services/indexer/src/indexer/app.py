@@ -38,7 +38,7 @@ def create_app(settings: Settings) -> FastAPI:
     stop = asyncio.Event()
     catalog = CatalogClient(settings.catalog_api_url, settings.catalog_api_token)
     meili = Meili(settings.meili_url, settings.meili_key, settings.task_timeout_seconds)
-    indexer = Indexer(catalog, meili, settings.reindex_page_size)
+    indexer = Indexer(catalog, meili, settings.reindex_page_size, settings.index_settings_file)
     consumer = Consumer(settings, indexer, status)
 
     async def run_consumer() -> None:

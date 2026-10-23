@@ -91,3 +91,34 @@ def test_the_facets_endpoint_gives_the_distributions_without_the_hits(client, ar
     assert answer["facets"]["places"] == {"Göteborg": 1}
     assert "hits" not in answer
     assert client.get(f"{API}/facets", params={"scope": "nonsense"}).status_code == 422
+
+
+def test_the_year_range_available_is_reported_as_facet_stats_not_as_a_long_list_of_years(client, archive):
+    found = client.get(f"{API}/documents").json()
+
+    assert found["facet_stats"] == {"year_from": {"min": 1889, "max": 1905}, "year_to": {"min": 1890, "max": 1906}}
+    assert "year_from" not in found["facets"] and "year_to" not in found["facets"]
+    narrowed = client.get(f"{API}/documents", params={"place": "Göteborg"}).json()
+    assert narrowed["facet_stats"]["year_from"] == {"min": 1889, "max": 1889}
+    assert client.get(f"{API}/facets", params={"scope": "subjects"}).json()["facet_stats"]["year_from"]["min"] == 1889
+
+
+def test_swedish_synonyms_are_applied_so_fartyg_finds_a_document_that_says_skepp_in_either_form(client, meili):
+    meili.add(
+        "documents",
+        document(title="Brev", text="Skepp lämnade hamnen"),
+        document(title="Journal", text="Skeppet gick i hamn"),
+        document(title="Annat", text="Ingenting alls"),
+    )
+
+    found = sorted(hit["title"] for hit in client.get(f"{API}/documents", params={"q": "fartyg"}).json()["hits"])
+    assert found == ["Brev"]
+    definite = sorted(hit["title"] for hit in client.get(f"{API}/documents", params={"q": "fartyget"}).json()["hits"])
+    assert definite == ["Journal"]
+
+
+def test_a_stop_word_on_its_own_finds_nothing_even_though_a_document_contains_it(client, meili):
+    meili.add("documents", document(title="Sten och Sand", text="x"))
+
+    assert client.get(f"{API}/documents", params={"q": "och"}).json()["hits"] == []
+    assert len(client.get(f"{API}/documents", params={"q": "Sten"}).json()["hits"]) == 1

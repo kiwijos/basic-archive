@@ -13,8 +13,8 @@ DOCUMENT_FIELDS = {"ship_type": "ship_types", "builder": "builders", "place": "p
 SUBJECT_FIELDS = {"kind": "entity", "ship_type": "ship_type", "builder": "builders", "place": "places"}
 
 FACETS = {
-    "documents": ["ship_types", "builders", "places", "verified", "document_type"],
-    "subjects": ["entity", "ship_type", "builders", "places", "organisation_type"],
+    "documents": ["ship_types", "builders", "places", "verified", "document_type", "year_from", "year_to"],
+    "subjects": ["entity", "ship_type", "builders", "places", "organisation_type", "year_from", "year_to"],
 }
 
 

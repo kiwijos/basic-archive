@@ -92,3 +92,21 @@ def test_the_indexer_and_search_keys_are_not_interchangeable(meili):
     assert post("/indexes/documents/documents", meili.search_key, [{"id": "x"}]).status_code == 403
     assert httpx.get(f"{MEILI_URL}/keys", headers={"Authorization": f"Bearer {meili.indexer_key}"}).status_code == 403
     assert httpx.get(f"{MEILI_URL}/keys", headers={"Authorization": f"Bearer {meili.search_key}"}).status_code == 403
+
+
+def test_a_reindex_rebuilds_even_when_the_indexes_themselves_are_gone(indexer, archive, meili):
+    indexer.reindex()
+    finished(indexer)
+    for index in ("documents", "subjects"):
+        meili._wait(meili.master.delete(f"/indexes/{index}").json()["taskUid"])
+    assert meili.master.get("/indexes/documents").status_code == 404
+
+    indexer.reindex()
+    result = finished(indexer)
+
+    assert result["state"] == "done", result
+    assert "verified" in meili.settings("documents")["filterableAttributes"]
+    assert meili.settings("documents")["synonyms"]["fartyg"] == ["skepp", "båt"]
+    assert len(meili.documents("documents")) == 5
+    # Filtering needs the filterable attributes, so this fails if the index was made with defaults.
+    assert meili.search("documents", "", filter="verified = false")["estimatedTotalHits"] == 5

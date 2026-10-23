@@ -225,3 +225,34 @@ def test_every_view_follows_the_indexing_contract(client, staff, yard):
         *list_view(client, "ship")["items"],
     ):
         validate("index.view", view)
+
+
+def test_a_ship_renamed_back_to_an_earlier_name_has_exactly_one_current_name(client, staff):
+    ship = client.post(f"{API}/ships", json={"name": "Vega", "launched": None}, headers=staff).json()["id"]
+    client.post(f"{API}/subjects/{ship}/names", json={"name": "Nordstjernan", "date": {"date_from": "1900-01-01", "date_to": "1910-01-01"}}, headers=staff)
+    back = client.post(f"{API}/subjects/{ship}/names", json={"name": "Vega", "date": {"date_from": "1910-01-02"}}, headers=staff)
+    assert back.status_code == 201, back.text
+
+    view = subject_view(client, "ship", ship).json()
+
+    assert [(n["name"], n["current"]) for n in view["names"] if n["current"]] == [("Vega", True)]
+    assert sum(n["current"] for n in view["names"]) == 1
+
+
+def test_a_document_stops_showing_the_facts_of_a_ship_that_was_deleted(client, staff, yard):
+    document = upload(client, staff).json()["id"]
+    link(client, staff, document, yard["ship"])
+    assert document_view(client, document).json()["ship_names"]
+
+    client.delete(f"{API}/ships/{yard['ship']}", headers=staff)
+
+    view = document_view(client, document).json()
+    assert (view["ship_names"], view["ship_types"], view["builders"], view["places"]) == ([], [], [], [])
+
+
+def test_a_ship_with_only_a_written_date_has_no_years(client, staff):
+    ship = client.post(f"{API}/ships", json={"name": "Freja", "launched": {"date_text": "omkring förra seklet"}}, headers=staff).json()["id"]
+
+    view = subject_view(client, "ship", ship).json()
+
+    assert (view["year_from"], view["year_to"]) == (None, None)

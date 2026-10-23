@@ -10,7 +10,7 @@ from catalog_api.contracts import validate
 from catalog_api.db import get_session
 from catalog_api.documents import document_fields, find_document
 from catalog_api.models import Document, DocumentSubject, Organisation, Relation, Ship, Subject
-from catalog_api.names import current_name, names_of
+from catalog_api.names import current_name, current_name_row, names_of
 from catalog_api.organisations import find_organisation
 from catalog_api.relations import live_relations
 from catalog_api.ships import find_ship
@@ -125,7 +125,8 @@ def subject_view(session: Session, kind: Literal["ship", "organisation"], subjec
             "year_from": None,
             "year_to": None,
         }
-    current = current_name(session, subject.id)
+    current_row = current_name_row(session, subject.id)
+    current = current_row.name if current_row else None
     return {
         "entity": kind,
         "id": str(subject.id),
@@ -137,7 +138,7 @@ def subject_view(session: Session, kind: Literal["ship", "organisation"], subjec
                 "date_text": name.date_text,
                 "date_from": name.date_from.isoformat() if name.date_from else None,
                 "date_to": name.date_to.isoformat() if name.date_to else None,
-                "current": name.name == current and name.name_type == "given",
+                "current": name.id == current_row.id if current_row else False,
             }
             for name in names_of(session, subject.id)
         ],
