@@ -19,4 +19,11 @@ def to_document(view: dict) -> dict:
         "places": view["places"],
         "year_from": view["year_from"],
         "year_to": view["year_to"],
+        # What the Ship's landing page shows; none of it is searched.
+        "tonnage": view["tonnage"],
+        "launched": view["launched"],
+        "fate": view["fate"],
+        "fate_date": view["fate_date"],
+        "relations": view["relations"],
+        "documents": view["documents"],
     }

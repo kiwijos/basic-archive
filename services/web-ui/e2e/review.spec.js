@@ -11,7 +11,7 @@ test.beforeAll(() => {
 });
 
 async function signIn(page) {
-  await page.goto("/");
+  await page.goto("/review");
   await page.getByLabel("Staff token").fill(token);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByText(/Signed in as/)).toBeVisible();

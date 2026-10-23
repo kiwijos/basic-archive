@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -8,14 +9,17 @@ from sqlalchemy.orm import Session
 from catalog_api.auth import only_service
 from catalog_api.contracts import validate
 from catalog_api.db import get_session
+from catalog_api.dates import present
 from catalog_api.documents import document_fields, find_document
-from catalog_api.models import Document, DocumentSubject, Organisation, Relation, Ship, Subject
-from catalog_api.names import current_name, current_name_row, names_of
+from catalog_api.verification import readings_of
+from catalog_api.models import Document, DocumentSubject, Image, Organisation, Relation, Ship, Subject
+from catalog_api.names import current_name_row, current_names, names_of
 from catalog_api.organisations import find_organisation
 from catalog_api.relations import live_relations
 from catalog_api.ships import find_ship
 
 MAX_PAGE = 100
+MAX_LINKED_DOCUMENTS = 200
 
 
 def checked(view: dict) -> dict:
@@ -40,9 +44,10 @@ def document_view(session: Session, document_id: uuid.UUID) -> dict:
     for link in fields["subjects"]:
         if link.kind != "ship":
             continue
-        view = subject_view(session, "ship", link.subject_id)
-        ship_names += [name["name"] for name in view["names"] if name["name"] not in ship_names]
-        for target, values in ((ship_types, [view["ship_type"]]), (builders, view["builders"]), (places, view["places"])):
+        subject, ship = find_ship(session, link.subject_id)
+        facts = built_facts(session, subject.id, ship)
+        ship_names += [name.name for name in names_of(session, subject.id) if name.name not in ship_names]
+        for target, values in ((ship_types, [ship.ship_type]), (builders, facts["builders"]), (places, facts["places"])):
             target += [value for value in values if value and value not in target]
     return {
         "entity": "document",
@@ -58,7 +63,22 @@ def document_view(session: Session, document_id: uuid.UUID) -> dict:
         "verified": fields["verified"],
         "verified_images": fields["verified_images"],
         "image_count": fields["image_count"],
-        "images": [{"id": str(image.id), "page_no": image.page_no} for image in images],
+        "images": [
+            {
+                "id": str(image.id),
+                "page_no": image.page_no,
+                "mime": image.mime,
+                "rights": image.rights,
+                "verified": image.verified,
+                "text_source": image.text_source,
+                "text": image.current_text or "",
+            }
+            for image in images
+        ],
+        "subjects": [
+            {"id": str(link.subject_id), "kind": link.kind, "name": link.name, "role": link.role}
+            for link in fields["subjects"]
+        ],
         "ship_names": ship_names,
         "ship_types": ship_types,
         "builders": builders,
@@ -87,13 +107,16 @@ def built_facts(session: Session, ship_id: uuid.UUID, ship: Ship) -> dict:
             Relation.predicate == "built_by", Relation.from_subject_id == ship_id
         )
     ).all()
+    yard_ids = [relation.to_subject_id for relation in relations]
+    names = current_names(session, yard_ids)
+    yard_places = dict(
+        session.execute(select(Organisation.subject_id, Organisation.place).where(Organisation.subject_id.in_(yard_ids))).all()
+    ) if yard_ids else {}
     for relation in relations:
-        name = current_name(session, relation.to_subject_id)
+        name = names[relation.to_subject_id]
         if name and name not in builders:
             builders.append(name)
-        place = relation.place or session.scalar(
-            select(Organisation.place).where(Organisation.subject_id == relation.to_subject_id)
-        )
+        place = relation.place or yard_places.get(relation.to_subject_id)
         if place and place not in places:
             places.append(place)
         start, end = _years(relation.date_from, relation.date_to)
@@ -111,15 +134,96 @@ def built_facts(session: Session, ship_id: uuid.UUID, ship: Ship) -> dict:
     }
 
 
+def _iso(value) -> str | None:
+    return value.isoformat() if value else None
+
+
+def _uncertain(value) -> dict | None:
+    value = present(value)
+    if value is None:
+        return None
+    return {"date_text": value.date_text, "date_from": _iso(value.date_from), "date_to": _iso(value.date_to)}
+
+
+def relations_of(session: Session, subject_id: uuid.UUID) -> list[dict]:
+    """A Subject's live Relations in both directions, each naming the Subject at the other end."""
+    relations = session.scalars(live_relations(session, subject_id)).all()
+    other_ids = [r.to_subject_id if r.from_subject_id == subject_id else r.from_subject_id for r in relations]
+    kinds = dict(session.execute(select(Subject.id, Subject.kind).where(Subject.id.in_(other_ids))).all()) if other_ids else {}
+    names = current_names(session, other_ids)
+    found = []
+    for relation, other_id in zip(relations, other_ids):
+        found.append(
+            (
+                (relation.date_from or date.min, relation.created_at),
+                {
+                    "predicate": relation.predicate,
+                    # "from": this Subject is the one the predicate is about (it was built_by ...).
+                    "direction": "from" if relation.from_subject_id == subject_id else "to",
+                    "other_id": str(other_id),
+                    "other_kind": kinds[other_id],
+                    "other_name": names[other_id],
+                    "place": relation.place,
+                    "date_text": relation.date_text,
+                    "date_from": _iso(relation.date_from),
+                    "date_to": _iso(relation.date_to),
+                    "source": relation.source,
+                },
+            )
+        )
+    return [relation for _, relation in sorted(found, key=lambda pair: pair[0])]
+
+
+def linked_documents(session: Session, subject_id: uuid.UUID) -> list[dict]:
+    documents = session.scalars(
+        select(Document)
+        .join(DocumentSubject, DocumentSubject.document_id == Document.id)
+        .where(DocumentSubject.subject_id == subject_id, Document.deleted_at.is_(None))
+        .order_by(Document.created_at)
+        .limit(MAX_LINKED_DOCUMENTS)
+    ).all()
+    if not documents:
+        return []
+    # Whether each is verified, from two queries for all of them: a Document is verified only when it
+    # has Images and every one has a Human transcription.
+    images: dict[uuid.UUID, list[uuid.UUID]] = {document.id: [] for document in documents}
+    for document_id, image_id in session.execute(
+        select(Image.document_id, Image.id).where(Image.document_id.in_(images), Image.deleted_at.is_(None))
+    ):
+        images[document_id].append(image_id)
+    readings = readings_of(session, [i for ids in images.values() for i in ids])
+    return [
+        {
+            "id": str(document.id),
+            "title": document.title,
+            "document_type": document.document_type,
+            "verified": bool(images[document.id]) and all(readings[i].verified for i in images[document.id]),
+        }
+        for document in documents
+    ]
+
+
 def subject_view(session: Session, kind: Literal["ship", "organisation"], subject_id: uuid.UUID) -> dict:
     if kind == "ship":
         subject, ship = find_ship(session, subject_id)
-        facts = {"ship_type": ship.ship_type, "organisation_type": None, **built_facts(session, subject_id, ship)}
+        facts = {
+            "ship_type": ship.ship_type,
+            "organisation_type": None,
+            "tonnage": float(ship.tonnage) if ship.tonnage is not None else None,
+            "launched": _uncertain(ship.launched),
+            "fate": ship.fate,
+            "fate_date": _uncertain(ship.fate_date),
+            **built_facts(session, subject_id, ship),
+        }
     else:
         subject, organisation = find_organisation(session, subject_id)
         facts = {
             "ship_type": None,
             "organisation_type": organisation.organisation_type,
+            "tonnage": None,
+            "launched": None,
+            "fate": None,
+            "fate_date": None,
             "builders": [],
             "places": [organisation.place] if organisation.place else [],
             "year_from": None,
@@ -143,6 +247,8 @@ def subject_view(session: Session, kind: Literal["ship", "organisation"], subjec
             for name in names_of(session, subject.id)
         ],
         **facts,
+        "relations": relations_of(session, subject.id),
+        "documents": linked_documents(session, subject.id),
     }
 
 

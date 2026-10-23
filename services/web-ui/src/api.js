@@ -1,3 +1,4 @@
+import { apiQuery } from "./search-state.js";
 export class ApiError extends Error {
   constructor(status, message) {
     super(message);
@@ -59,5 +60,47 @@ export function createApi({ fetch, getToken, onUnauthorized, base = "" }) {
     saveCorrection: (imageId, text) =>
       request(`${catalog}/images/${imageId}/transcriptions`, { method: "POST", json: { source: "human", text } }),
     readAgain: (imageId) => request(`${catalog}/images/${imageId}/ocr`, { method: "POST" }),
+  };
+}
+
+/** What went wrong with a public request, for a visitor. Status 0 means no answer at all. */
+export function describeSearchFailure(status, body, retryAfter) {
+  const detail = body && typeof body === "object" ? body.detail : undefined;
+  if (status === 0) return "Could not reach the archive. Check your connection and try again.";
+  if (status === 404) return "That page does not exist.";
+  if (status === 429) {
+    const seconds = Number.parseInt(retryAfter, 10);
+    return Number.isFinite(seconds) ? `Too many searches in a short time. Try again in ${seconds} seconds.` : "Too many searches in a short time. Try again shortly.";
+  }
+  if (status >= 500) return "Search is not available right now. Try again in a moment.";
+  if (Array.isArray(detail)) return detail.map((problem) => `${problem.loc.slice(1).join(".")}: ${problem.msg}`).join("; ");
+  return typeof detail === "string" ? detail : `The request was refused (status ${status}).`;
+}
+
+/**
+ * The public calls to search-api. Nobody signs in for these, so no credentials are sent, and every
+ * address is relative so the pages work behind whatever host the Ingress answers on.
+ */
+export function createSearchApi({ fetch, base = "" }) {
+  async function get(path) {
+    let response;
+    try {
+      response = await fetch(`${base}/api/search${path}`);
+    } catch {
+      throw new ApiError(0, describeSearchFailure(0));
+    }
+    if (!response.ok) {
+      const parsed = await response.json().catch(() => undefined);
+      throw new ApiError(response.status, describeSearchFailure(response.status, parsed, response.headers.get("Retry-After")));
+    }
+    return response.json();
+  }
+
+  return {
+    search: (state) => get(`/${state.scope}?${apiQuery(state)}`),
+    suggest: (text) => get(`/suggest?${new URLSearchParams({ q: text })}`),
+    document: (id) => get(`/documents/${encodeURIComponent(id)}`),
+    ship: (id) => get(`/subjects/${encodeURIComponent(id)}`),
+    organisation: (id) => get(`/subjects/${encodeURIComponent(id)}`),
   };
 }

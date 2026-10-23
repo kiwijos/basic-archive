@@ -15,7 +15,9 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; line-height: 1.5; }
-main { max-width: 72rem; margin: 0 auto; padding: 1rem 1.25rem 3rem; outline: none; }
+main { max-width: 72rem; margin: 0 auto; padding: 1rem 1.25rem 3rem; }
+/* main is focused after a page change so screen readers start at the new page; it is not a control */
+main:focus { outline: none; }
 .narrow { max-width: 34rem; }
 a { color: var(--accent); }
 :focus-visible { outline: 3px solid #f5a623; outline-offset: 2px; }
@@ -71,3 +73,66 @@ progress { width: 6rem; vertical-align: middle; }
   .split, .row { grid-template-columns: 1fr; }
   .scan { position: static; }
 }
+
+/* ---- public pages ---- */
+.search-form { display: grid; gap: .35rem; margin: .5rem 0 1rem; }
+.search-row { display: flex; gap: .5rem; align-items: flex-start; }
+.combo { position: relative; flex: 1; }
+.combo input { width: 100%; font-size: 1.1rem; padding: .6rem .75rem; }
+.suggestions { position: absolute; z-index: 5; left: 0; right: 0; margin: 0; padding: 0; list-style: none; background: #fff; border: 1px solid #7a8594; border-top: 0; border-radius: 0 0 4px 4px; box-shadow: 0 6px 12px rgba(0,0,0,.12); }
+.suggestions li { padding: .45rem .75rem; cursor: pointer; }
+.suggestions li.active, .suggestions li:hover { background: #e8f0f8; }
+.suggestion-kind, .suggestion-note { color: var(--muted); font-size: .85rem; }
+
+.scopes { display: flex; gap: .5rem; margin-bottom: 1rem; }
+.scopes button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+.search-layout { display: grid; grid-template-columns: 17rem minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+.filters, .facets { display: grid; gap: 1rem; }
+.filters { margin-bottom: 1rem; }
+fieldset { border: 1px solid var(--line); border-radius: 4px; padding: .5rem .75rem; margin: 0; }
+legend { font-weight: 600; padding: 0 .25rem; }
+.facet ul { list-style: none; margin: 0; padding: 0; max-height: 14rem; overflow: auto; }
+.facet li { display: flex; gap: .4rem; align-items: baseline; padding: .1rem 0; }
+.count { color: var(--muted); }
+.years label { display: block; font-weight: 400; margin-top: .25rem; }
+.years input { width: 100%; }
+.years button, .clear { margin-top: .5rem; }
+.check { display: flex; gap: .5rem; align-items: baseline; }
+.check label { font-weight: 400; }
+
+.summary { color: var(--muted); margin-top: 0; }
+.results { list-style: none; padding: 0; margin: 0; display: grid; gap: 1rem; }
+.result { border-bottom: 1px solid var(--line); padding-bottom: 1rem; }
+.result h2 { margin: 0 0 .25rem; font-size: 1.2rem; }
+.meta { display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; margin: .25rem 0; color: var(--muted); }
+.snippet { margin: .4rem 0 0; }
+mark { background: #fff1a8; color: inherit; padding: 0 .1em; border-radius: 2px; }
+.matched-name { margin: .1rem 0; font-weight: 600; }
+
+.badge-verified { color: var(--good); }
+.badge-machine { color: var(--waiting); }
+.badge-partial { color: var(--info); }
+.badge-empty, .badge-kind, .badge-current { color: var(--muted); }
+.badge-current { margin-left: .5rem; }
+
+.pager { display: flex; gap: 1rem; align-items: center; margin-top: 1.5rem; }
+.pager .disabled { color: var(--muted); }
+
+.record .back { margin-top: .25rem; }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 1rem 0; }
+.facts dt { font-weight: 600; }
+.facts dd { margin: 0; }
+.links, .relations, .names { padding-left: 1.2rem; }
+.names li.current { font-weight: 400; }
+.page-text { margin: 1rem 0 1.5rem; padding-top: .5rem; border-top: 1px solid var(--line); }
+.page-text h3 { margin: 0; }
+.transcript { white-space: pre-wrap; background: #fff; border: 1px solid var(--line); border-radius: 4px; padding: .75rem 1rem; max-height: 30rem; overflow: auto; }
+
+@media (max-width: 52rem) {
+  .search-layout { grid-template-columns: 1fr; }
+}
+
+.matched-note { font-weight: 600; margin: .25rem 0; }
+.names li.matched { background: #fff1a8; padding: .1rem .35rem; border-radius: 3px; }
+.badge-matched { color: var(--waiting); margin-left: .5rem; }

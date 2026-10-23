@@ -31,3 +31,13 @@ export function link(navigate, path, text) {
 export function formatTime(iso) {
   return new Date(iso).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
 }
+
+/** Text with its matches marked, built from parts so nothing from the archive is ever read as HTML. */
+export function highlighted(parts) {
+  return parts.map((part) => (part.match ? h("mark", {}, part.text) : part.text));
+}
+
+/** How far a text can be trusted: always in words, never by colour alone. */
+export function verificationBadge({ status, label }) {
+  return h("span", { class: `badge badge-verification badge-${status}`, "data-verification": status }, label);
+}

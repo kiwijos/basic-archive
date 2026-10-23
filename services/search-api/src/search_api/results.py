@@ -66,3 +66,47 @@ def subject_hit(hit: dict) -> dict:
         "year_to": hit.get("year_to"),
         "highlights": {"name": parts(formatted.get("name")), "names": parts(matched) if matched else []},
     }
+
+
+def document_landing(hit: dict, iiif_base: str) -> dict:
+    """Everything a Document's own page shows."""
+    return {
+        "id": hit["id"],
+        "title": hit["title"],
+        "document_type": hit.get("document_type"),
+        "description": hit.get("description"),
+        "physical_location": hit.get("physical_location"),
+        "date_text": hit.get("date_text"),
+        "year_from": hit.get("year_from"),
+        "year_to": hit.get("year_to"),
+        "verified": hit["verified"],
+        "verified_images": hit["verified_images"],
+        "image_count": hit["image_count"],
+        "images": [{**image, "iiif_info": f"{iiif_base}/{image['id']}/info.json"} for image in hit.get("images", [])],
+        "subjects": hit.get("subjects", []),
+    }
+
+
+def subject_landing(hit: dict) -> dict:
+    """Everything a Ship's or Organisation's own page shows."""
+    return {
+        "id": hit["id"],
+        "entity": hit["entity"],
+        "name": hit["name"],
+        "names": [
+            {k: detail[k] for k in ("name", "name_type", "date_text", "date_from", "date_to", "current")}
+            for detail in hit["name_details"]
+        ],
+        "ship_type": hit.get("ship_type"),
+        "organisation_type": hit.get("organisation_type"),
+        "tonnage": hit.get("tonnage"),
+        "launched": hit.get("launched"),
+        "fate": hit.get("fate"),
+        "fate_date": hit.get("fate_date"),
+        "builders": hit.get("builders", []),
+        "places": hit.get("places", []),
+        "year_from": hit.get("year_from"),
+        "year_to": hit.get("year_to"),
+        "relations": hit.get("relations", []),
+        "documents": hit.get("documents", []),
+    }

@@ -30,7 +30,10 @@ def document(**overrides) -> dict:
         "verified": False,
         "verified_images": 0,
         "image_count": 1,
-        "images": [{"id": new_id(), "page_no": 1}],
+        "images": [
+            {"id": new_id(), "page_no": 1, "mime": "image/png", "rights": "reserved", "verified": False, "text_source": "machine", "text": "Skeppet Vega lämnade Göteborg"}
+        ],
+        "subjects": [],
         "ship_names": [],
         "ship_types": [],
         "builders": [],
@@ -57,6 +60,12 @@ def ship(**overrides) -> dict:
         "places": [],
         "year_from": None,
         "year_to": None,
+        "tonnage": None,
+        "launched": None,
+        "fate": None,
+        "fate_date": None,
+        "relations": [],
+        "documents": [],
     }
     view.update(overrides)
     _contract.validate(view)

@@ -30,36 +30,47 @@ def record_changed(
     """Queue a record.changed event for the relay to publish, and one for everything whose
     indexed record shows this Subject's facts.
 
-    `builder_edit` is False when a Relation is what changed: the Ships on either end are announced
-    by the Relation code already, so an organisation need not announce the Ships it built.
+    `builder_edit` is False when a Relation is what changed: the Subjects on either end are announced
+    by the Relation code already, so they need not announce each other again.
     """
     _changed(session, subject.kind, subject.id, op)
-    for entity, entity_id in _dependents(session, subject, builder_edit):
+    for entity, entity_id in _dependents(session, subject, builder_edit and op == "upsert"):
         _changed(session, entity, entity_id, "upsert")
 
 
-def _dependents(session: Session, subject: Subject, builder_edit: bool) -> list[tuple[str, uuid.UUID]]:
-    """Documents linked to the Subject and, for a builder, the Ships it built and their Documents."""
-    subject_ids = [subject.id]
+def _dependents(session: Session, subject: Subject, own_edit: bool) -> list[tuple[str, uuid.UUID]]:
+    """What shows this Subject: the Documents linked to it, and when the Subject itself changed, the
+    Subjects it is related to (their pages name it) and, for a builder, its Ships' Documents."""
     dependents: list[tuple[str, uuid.UUID]] = []
-    if subject.kind == "organisation" and builder_edit:
-        ships = session.scalars(
-            select(Relation.from_subject_id).where(
-                Relation.to_subject_id == subject.id,
-                Relation.predicate == "built_by",
-                Relation.deleted_at.is_(None),
-            )
+    document_subjects = [subject.id]
+    if own_edit:
+        counterparts = session.execute(
+            select(Subject.kind, Subject.id)
+            .join(Relation, ((Relation.from_subject_id == Subject.id) & (Relation.to_subject_id == subject.id))
+                  | ((Relation.to_subject_id == Subject.id) & (Relation.from_subject_id == subject.id)))
+            .where(Relation.deleted_at.is_(None))
+            .distinct()
         ).all()
-        dependents += [("ship", ship_id) for ship_id in ships]
-        subject_ids += ships
+        dependents += [(kind, subject_id) for kind, subject_id in counterparts]
+        if subject.kind == "organisation":
+            document_subjects += [i for kind, i in counterparts if kind == "ship"]
     documents = session.scalars(
-        select(DocumentSubject.document_id).where(DocumentSubject.subject_id.in_(subject_ids)).distinct()
+        select(DocumentSubject.document_id).where(DocumentSubject.subject_id.in_(document_subjects)).distinct()
     ).all()
     return dependents + [("document", document_id) for document_id in documents]
 
 
 def document_changed(session: Session, document: Document) -> None:
+    """A Document's record changed, and so did the pages of the Subjects it is linked to: they list it
+    with its title and whether it is verified."""
     _changed(session, "document", document.id, "upsert")
+    linked = session.execute(
+        select(Subject.kind, Subject.id)
+        .join(DocumentSubject, DocumentSubject.subject_id == Subject.id)
+        .where(DocumentSubject.document_id == document.id)
+    ).all()
+    for kind, subject_id in linked:
+        _changed(session, kind, subject_id, "upsert")
 
 
 def ocr_requested(session: Session, image_id: uuid.UUID) -> None:
