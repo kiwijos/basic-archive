@@ -1,0 +1,36 @@
+# Image tiles get their own Ingress so they can be limited on their own: one deep-zoom view asks for
+# dozens of tiles at once, which the rest of the site never does.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: iiif-ratelimit
+  namespace: ship-archive
+spec:
+  rateLimit:
+    # Per client address: a steady 100 requests a second, and bursts up to 300 for the first screenful
+    # of tiles. Far above what a person zooming asks for, far below what a script hammering the
+    # decoder would.
+    average: 100
+    period: 1s
+    burst: 300
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ship-archive-iiif
+  namespace: ship-archive
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: ship-archive-iiif-ratelimit@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          # Only the IIIF Image API. Cantaloupe's health and admin addresses are not routed.
+          - path: /iiif/3
+            pathType: Prefix
+            backend:
+              service:
+                name: cantaloupe
+                port:
+                  number: 8182

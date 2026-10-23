@@ -1,4 +1,4 @@
-.PHONY: cluster-tools secrets deploy smoke e2e reindex ocr-parallel resilience test test-db
+.PHONY: cluster-tools secrets deploy smoke e2e reindex iiif-limits ocr-parallel resilience test test-db
 
 # One-time cluster prerequisites: Traefik and metrics-server (needs helm).
 cluster-tools:
@@ -21,6 +21,7 @@ deploy: secrets
 	kubectl -n ship-archive rollout status deployment/transcribe-worker --timeout=180s
 	kubectl -n ship-archive rollout status deployment/indexer --timeout=180s
 	kubectl -n ship-archive rollout status deployment/search-api --timeout=180s
+	kubectl -n ship-archive rollout status deployment/cantaloupe --timeout=240s
 	kubectl -n ship-archive rollout status deployment/web-ui --timeout=180s
 
 smoke:
@@ -38,6 +39,10 @@ ocr-parallel:
 # Rebuilds the whole search index from the catalog, then waits for it to finish.
 reindex:
 	./scripts/reindex.sh
+
+# Hammers image tiles through the Ingress: cache headers are set, excess requests get 429, and the client recovers.
+iiif-limits:
+	./scripts/iiif-limits.sh
 
 # Restarts RabbitMQ with a job waiting, and kills catalog-api with the broker down, on the live cluster.
 resilience:

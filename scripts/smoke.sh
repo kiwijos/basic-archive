@@ -287,6 +287,25 @@ search_for /subjects "any(.hits[]; .id == \"$ship\" and .builders == [\"Yard $ru
 search_for /documents "any(.hits[]; .id == \"$document\")" 30 --data-urlencode "q=$run" --data-urlencode "builder=Yard $run" --data-urlencode place=Lindholmen \
   || fail "the document was not found by the builder and place of the ship it shows"
 
+# IIIF: the Image id is the public identifier, and Cantaloupe reads the original from Garage under that
+# same id. Information, tiles and the links in search results all come through the Ingress.
+info=$(curl -sf "$BASE_URL/iiif/3/$image/info.json") || fail "the IIIF information document for the uploaded Image is not served"
+echo "$info" | jq -e --arg id "$image" '.protocol == "http://iiif.io/api/image" and .type == "ImageService3" and .width > 0 and .height > 0 and (.id | endswith("/iiif/3/" + $id)) and (.id | startswith("http"))' >/dev/null \
+  || fail "the IIIF information document is wrong: $info"
+tile=$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "$BASE_URL/iiif/3/$image/full/!256,256/0/default.jpg")
+[ "$tile" = "200 image/jpeg" ] || fail "a tile of the uploaded Image returned [$tile]"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/iiif/3/00000000-0000-4000-8000-000000000000/info.json")" = 404 ] || fail "an unknown Image id did not give 404"
+curl -sI "$BASE_URL/iiif/3/$image/full/!256,256/0/default.jpg" | tr -d '\r' | grep -iq '^cache-control: .*max-age=' || fail "tiles are served without cache headers"
+thumbnail=$(curl -sfG "$BASE_URL/api/search/documents" --data-urlencode "q=$run" --data-urlencode page_size=50 --data-urlencode "n=$RANDOM" | jq -r --arg d "$document" '.hits[] | select(.id == $d) | .thumbnail')
+info_link=$(curl -sfG "$BASE_URL/api/search/documents" --data-urlencode "q=$run" --data-urlencode page_size=50 --data-urlencode "n=$RANDOM" | jq -r --arg d "$document" '.hits[] | select(.id == $d) | .pages[0].iiif_info')
+[ "$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "$BASE_URL$thumbnail")" = "200 image/jpeg" ] || fail "the thumbnail link in the search result does not work: $thumbnail"
+curl -sf "$BASE_URL$info_link" | jq -e '.width > 0' >/dev/null || fail "the information link in the search result does not work: $info_link"
+# Garage is never reachable through the Ingress: its object addresses and admin API fall through to the app.
+for path in "masters/$image" "api/garage/v1/status" "admin" "iiif/3/$image/../../masters/$image"; do
+  type=$(curl -s -o /dev/null -w '%{content_type}' "$BASE_URL/$path")
+  case "$type" in image/*|application/octet-stream) fail "/$path served $type, so storage may be exposed" ;; esac
+done
+
 # Landing pages: every record has an open page of its own, read from the index with no token.
 sister=$(api POST /ships "{\"name\":\"Sister $run\"}" | jq -r .id)
 api POST /relations "{\"from_subject_id\":\"$sister\",\"predicate\":\"rebuilt_from\",\"to_subject_id\":\"$ship\",\"date\":{\"date_text\":\"1912\"}}" >/dev/null \
@@ -316,4 +335,4 @@ first_cache=$(curl -sG -D - -o /dev/null "$BASE_URL/api/search/documents" --data
 second_cache=$(curl -sG -D - -o /dev/null "$BASE_URL/api/search/documents" --data-urlencode "q=$cache_probe" | tr -d '\r' | awk -F': ' 'tolower($1) == "x-cache" {print $2}')
 [ "$first_cache,$second_cache" = "MISS,HIT" ] || fail "repeated queries were not cached: $first_cache,$second_cache"
 
-echo "SMOKE OK: ship $id created and read back as $staff_name; renames, sale, rebuild, validation and delete verified; Image uploaded to Garage, duplicate flagged, link read back, download address works and expires, key rights verified; page read automatically at $accuracy accuracy, corrupt image failed into the dead-letter queue, re-read works; page added, scan served, correction verified and kept beside the readings, review queue counts right, web UI served with deep links; search finds the corrected document verified, the unverified one only by default, a ship by its old name, builder and year from Relations, deletes leave the index, page size capped, cache hits; open landing records for a Document and for two Ships, with rights, verified state, names, relations and a rebuilt-from link, and their addresses reload"
+echo "SMOKE OK: ship $id created and read back as $staff_name; renames, sale, rebuild, validation and delete verified; Image uploaded to Garage, duplicate flagged, link read back, download address works and expires, key rights verified; page read automatically at $accuracy accuracy, corrupt image failed into the dead-letter queue, re-read works; page added, scan served, correction verified and kept beside the readings, review queue counts right, web UI served with deep links; search finds the corrected document verified, the unverified one only by default, a ship by its old name, builder and year from Relations, deletes leave the index, page size capped, cache hits; open landing records for a Document and for two Ships, with rights, verified state, names, relations and a rebuilt-from link, and their addresses reload; IIIF information, a tile and the links in search results work through the Ingress and Garage is not exposed"

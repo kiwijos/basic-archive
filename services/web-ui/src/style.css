@@ -136,3 +136,10 @@ mark { background: #fff1a8; color: inherit; padding: 0 .1em; border-radius: 2px;
 .matched-note { font-weight: 600; margin: .25rem 0; }
 .names li.matched { background: #fff1a8; padding: .1rem .35rem; border-radius: 3px; }
 .badge-matched { color: var(--waiting); margin-left: .5rem; }
+
+/* ---- scan viewer ---- */
+.scan-viewer { margin: 1.5rem 0; }
+.viewer-controls, .viewer-pages { display: flex; gap: .5rem; flex-wrap: wrap; margin: .5rem 0; }
+.viewer-pages button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.viewer-status { color: var(--muted); margin: .25rem 0; }
+.viewer-stage { height: min(75vh, 46rem); min-height: 22rem; background: #0b1b3a; border: 1px solid var(--line); border-radius: 4px; }
