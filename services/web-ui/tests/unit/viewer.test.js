@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parsePage, viewerLabel, viewerOptions, viewerPages } from "../../src/viewer.js";
+import { createTileWatch, parsePage, VIEWER_FAILED, viewerLabel, viewerOptions, viewerPages } from "../../src/viewer.js";
 
 const ID_1 = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const ID_2 = "5b1d0f0e-0000-4000-8000-000000000002";
@@ -67,4 +67,29 @@ test("the viewer says what it shows and how to use it, for people who cannot see
   assert.match(label, /plus and minus/i);
   assert.match(label, /arrow keys/i);
   assert.doesNotMatch(viewerLabel("Brev", { pageNo: 1, label: "Scan" }, 1), /page 1 of/i);
+});
+
+test("a few failed tiles in a row are told to the visitor, one stray failure is not", () => {
+  const watch = createTileWatch();
+
+  assert.equal(watch.failed(), false);
+  assert.equal(watch.failed(), false);
+  assert.equal(watch.failed(), true);
+  assert.equal(watch.failed(), true, "and it stays told while they keep failing");
+});
+
+test("a tile that loads clears the count, so a flaky moment is forgotten", () => {
+  const watch = createTileWatch();
+  watch.failed();
+  watch.failed();
+
+  watch.loaded();
+
+  assert.equal(watch.failed(), false);
+  assert.equal(watch.failed(), false);
+});
+
+test("the message for a viewer that could not show the scan says what to do", () => {
+  assert.match(VIEWER_FAILED, /could not be loaded/i);
+  assert.match(VIEWER_FAILED, /try again/i);
 });

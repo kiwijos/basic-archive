@@ -1,5 +1,5 @@
 import { h } from "../dom.js";
-import { parsePage, viewerLabel, viewerOptions, viewerPages } from "../viewer.js";
+import { createTileWatch, parsePage, VIEWER_FAILED, viewerLabel, viewerOptions, viewerPages } from "../viewer.js";
 
 const ZOOM_STEP = 1.6;
 
@@ -30,13 +30,12 @@ export function scanViewer({ title, images }) {
     button("Full screen", (v) => v.setFullScreen(!v.isFullPage()), "Full screen on or off"),
   );
 
-  const selector = h("div", { class: "viewer-pages", role: "group", "aria-label": "Pages" });
+  // Built once and only marked afterwards, so the button just pressed keeps the keyboard focus.
+  const pageButtons = pages.length < 2 ? [] : pages.map((p) => h("button", { type: "button", onclick: () => show(p) }, p.label));
+  const selector = h("div", { class: "viewer-pages", role: "group", "aria-label": "Pages" }, pageButtons);
 
   function paintSelector() {
-    if (pages.length < 2) return;
-    selector.replaceChildren(
-      ...pages.map((p) => h("button", { type: "button", "aria-pressed": String(p === page), onclick: () => show(p) }, p.label)),
-    );
+    pageButtons.forEach((button, index) => button.setAttribute("aria-pressed", String(pages[index] === page)));
   }
 
   // The library listens for keys on its own canvas, which is what takes focus, so the label goes there.
@@ -61,17 +60,33 @@ export function scanViewer({ title, images }) {
     viewer?.open(viewerOptions(page.infoUrl).tileSources);
   }
 
+  const failure = () => {
+    status.textContent = "";
+    problem.textContent = VIEWER_FAILED;
+  };
+
   (async () => {
-    const { default: OpenSeadragon } = await import("openseadragon");
-    if (disposed) return;
-    viewer = OpenSeadragon({ element: stage, ...viewerOptions(page.infoUrl) });
+    try {
+      const { default: OpenSeadragon } = await import("openseadragon");
+      if (disposed) return;
+      viewer = OpenSeadragon({ element: stage, ...viewerOptions(page.infoUrl) });
+    } catch {
+      // The library did not load (a network drop, or a page left open across an upgrade).
+      if (!disposed) failure();
+      return;
+    }
     describe();
+    const tiles = createTileWatch();
     viewer.addHandler("open", () => {
       status.textContent = "";
     });
-    viewer.addHandler("open-failed", () => {
-      status.textContent = "";
-      problem.textContent = "The scan could not be loaded. Try again in a moment.";
+    viewer.addHandler("open-failed", failure);
+    viewer.addHandler("tile-load-failed", () => {
+      if (tiles.failed()) failure();
+    });
+    viewer.addHandler("tile-loaded", () => {
+      tiles.loaded();
+      if (problem.textContent === VIEWER_FAILED) problem.textContent = "";
     });
   })();
 

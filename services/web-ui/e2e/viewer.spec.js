@@ -7,6 +7,7 @@ const blueprint = process.env.BLUEPRINT_FILE;
 const sheetTwo = process.env.BLUEPRINT_FILE_2;
 
 const ids = {};
+const TILE_ROUTE = /\/iiif\/3\/[0-9a-f-]{36}\/\d+,\d+,\d+,\d+\/\d+,\d*\/0\/default\.jpg/;
 const TILE = /\/iiif\/3\/([0-9a-f-]{36})\/(\d+),(\d+),(\d+),(\d+)\/(\d+),(\d*)\/0\/default\.jpg/;
 
 test.describe.configure({ mode: "serial" });
@@ -117,6 +118,7 @@ test("a document with two sheets lets you choose which one to zoom into, and the
 
   await page.getByRole("button", { name: "Page 2" }).click();
 
+  await expect(page.getByRole("button", { name: "Page 2" })).toBeFocused(); // a keyboard user keeps their place
   await expect(page).toHaveURL(/\?page=2$/);
   await expect(page.getByRole("button", { name: "Page 2" })).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => seen.infoUrls.some((url) => url.includes(ids.second)), { timeout: 20_000 }).toBe(true);
@@ -134,4 +136,28 @@ test("the scan is served through the site's own address, so the page works behin
   await expect(page.locator(".viewer-stage canvas")).toBeVisible({ timeout: 20_000 });
 
   expect([...origins]).toEqual([new URL(page.url()).origin]);
+});
+
+test("when the tiles keep failing the visitor is told, not left with an empty box", async ({ page }) => {
+  await page.route(TILE_ROUTE, (route) => route.fulfill({ status: 500, body: "broken" }));
+  await page.goto(`/documents/${ids.document}`);
+
+  await expect(page.getByRole("alert").filter({ hasText: "could not be loaded" })).toBeVisible({ timeout: 20_000 });
+});
+
+test("when the scan's information cannot be fetched the visitor is told", async ({ page }) => {
+  await page.route("**/iiif/3/*/info.json", (route) => route.fulfill({ status: 503, body: "down" }));
+  await page.goto(`/documents/${ids.document}`);
+
+  await expect(page.getByRole("alert").filter({ hasText: "could not be loaded" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("status").filter({ hasText: "Loading the scan" })).toHaveCount(0);
+});
+
+test("when the viewer itself cannot be loaded the visitor is told, and the rest of the page still works", async ({ page }) => {
+  await page.route("**/assets/openseadragon-*.js", (route) => route.abort());
+  await page.goto(`/documents/${ids.document}`);
+
+  await expect(page.getByRole("alert").filter({ hasText: "could not be loaded" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Linjeritning");
+  await expect(page.locator(".transcript, .page-text").first()).toBeVisible();
 });

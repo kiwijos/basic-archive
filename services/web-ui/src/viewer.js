@@ -43,3 +43,23 @@ export function viewerLabel(title, page, total) {
   const which = total > 1 ? `, page ${page.pageNo} of ${total}` : "";
   return `Zoomable scan of ${title}${which}. Use plus and minus to zoom and the arrow keys to move around.`;
 }
+
+/** Shown when the scan cannot be displayed, whether the viewer never started or its tiles keep failing. */
+export const VIEWER_FAILED = "The scan could not be loaded. Try again in a moment.";
+
+/**
+ * Tells when failed tiles are worth a message: several in a row, which is what a stopped service or a
+ * refused request looks like, as opposed to one tile that failed and loads on the next try.
+ */
+export function createTileWatch(limit = 3) {
+  let failures = 0;
+  return {
+    failed() {
+      failures += 1;
+      return failures >= limit;
+    },
+    loaded() {
+      failures = 0;
+    },
+  };
+}

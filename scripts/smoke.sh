@@ -300,10 +300,16 @@ thumbnail=$(curl -sfG "$BASE_URL/api/search/documents" --data-urlencode "q=$run"
 info_link=$(curl -sfG "$BASE_URL/api/search/documents" --data-urlencode "q=$run" --data-urlencode page_size=50 --data-urlencode "n=$RANDOM" | jq -r --arg d "$document" '.hits[] | select(.id == $d) | .pages[0].iiif_info')
 [ "$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "$BASE_URL$thumbnail")" = "200 image/jpeg" ] || fail "the thumbnail link in the search result does not work: $thumbnail"
 curl -sf "$BASE_URL$info_link" | jq -e '.width > 0' >/dev/null || fail "the information link in the search result does not work: $info_link"
-# Garage is never reachable through the Ingress: its object addresses and admin API fall through to the app.
-for path in "masters/$image" "api/garage/v1/status" "admin" "iiif/3/$image/../../masters/$image"; do
-  type=$(curl -s -o /dev/null -w '%{content_type}' "$BASE_URL/$path")
-  case "$type" in image/*|application/octet-stream) fail "/$path served $type, so storage may be exposed" ;; esac
+# Garage and Cantaloupe's own endpoints are never reachable through the Ingress. Each of these addresses
+# must give the app's own page or a refusal, never JSON, XML or an image from somewhere else. The dot
+# segments are sent as they are, because curl would otherwise tidy them away before they reach the Ingress.
+for path in "masters/$image" "api/garage/v1/status" "admin" "health" "iiif/3/$image/../../masters/$image" \
+            "iiif/3/../health" "iiif/3/%2e%2e/health" "iiif/3/$image/..%2f..%2fadmin"; do
+  answer=$(curl -s --path-as-is -o /dev/null -w '%{http_code} %{content_type}' "$BASE_URL/$path")
+  case "$answer" in
+    "200 text/html"* | 4* | 502*) ;;  # the app's own page, or the Ingress refusing the address
+    *) fail "/$path answered [$answer], so something other than the app or the IIIF API may be reachable" ;;
+  esac
 done
 
 # Landing pages: every record has an open page of its own, read from the index with no token.
