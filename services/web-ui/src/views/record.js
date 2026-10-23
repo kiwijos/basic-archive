@@ -3,6 +3,7 @@ import { pathFor, pathForRecord } from "../router.js";
 import { readContext } from "../record-context.js";
 import { imageVerification, matchedNameOnPage, nameTimeline, periodText, relationSentence, rightsInfo, verification, yearsText } from "../view-models.js";
 import { link, verificationBadge } from "../widgets.js";
+import { scanViewer } from "./scan-viewer.js";
 
 const KIND_NAMES = { ship: "Ship", organisation: "Organisation", document: "Document" };
 
@@ -20,9 +21,10 @@ function rights(code) {
 
 /** A Document's own page: what it is, who and what it is about, and the text of each page with how far to trust it. */
 function documentPage({ record, navigate }) {
+  const viewer = scanViewer({ title: record.title, images: record.images });
   const overall = verification(record);
   const date = record.date_text || yearsText(record.year_from, record.year_to);
-  return [
+  const nodes = [
     h("h1", {}, record.title),
     h("p", { class: "meta" }, verificationBadge(overall), h("span", {}, KIND_NAMES.document)),
     facts([
@@ -41,6 +43,7 @@ function documentPage({ record, navigate }) {
           )),
         )
       : null,
+    viewer?.element ?? null,
     h(
       "section",
       { "aria-labelledby": "text" },
@@ -58,6 +61,7 @@ function documentPage({ record, navigate }) {
       }),
     ),
   ];
+  return { nodes, dispose: () => viewer?.dispose() };
 }
 
 /** A Ship's or Organisation's own page: its names over time, its relations to other records, and the Documents about it. */
@@ -135,6 +139,7 @@ function subjectPage({ record, navigate, kind, matchedName }) {
 /** The permanent page of one record. It is read from the search index, so it is open to everyone. */
 export function recordView({ api, navigate, setTitle, kind, id }) {
   let disposed = false;
+  let release = () => {};
   const body = h("div", {}, h("p", { role: "status" }, "Loading…"));
   const context = readContext(location.search);
   const back = h("p", { class: "back" }, link(navigate, context.back, context.back === pathFor("search") ? "← Search the archive" : "← Back to your search"));
@@ -146,7 +151,13 @@ export function recordView({ api, navigate, setTitle, kind, id }) {
       // A Ship's address shows a Ship; an Organisation's id at a Ship's address is not found.
       if (kind !== "document" && record.entity !== kind) throw Object.assign(new Error("That page does not exist."), { status: 404 });
       setTitle(record.title ?? record.name ?? "Record");
-      body.replaceChildren(...(kind === "document" ? documentPage({ record, navigate }) : subjectPage({ record, navigate, kind, matchedName: context.name })).filter(Boolean));
+      if (kind === "document") {
+        const page = documentPage({ record, navigate });
+        release = page.dispose;
+        body.replaceChildren(...page.nodes.filter(Boolean));
+      } else {
+        body.replaceChildren(...subjectPage({ record, navigate, kind, matchedName: context.name }).filter(Boolean));
+      }
     } catch (error) {
       if (disposed) return;
       setTitle(error.status === 404 ? "Not found" : "Problem");
@@ -159,6 +170,7 @@ export function recordView({ api, navigate, setTitle, kind, id }) {
     element: h("article", { class: "record" }, back, body),
     dispose() {
       disposed = true;
+      release();
     },
   };
 }

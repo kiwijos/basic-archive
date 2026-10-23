@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [catalog-api, transcribe-worker, indexer, search-api, web-ui]
+        service: [catalog-api, transcribe-worker, indexer, search-api, web-ui, cantaloupe]
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4

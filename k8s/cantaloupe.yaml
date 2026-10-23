@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cantaloupe
+  namespace: ship-archive
+spec:
+  selector:
+    app: cantaloupe
+  ports:
+    - port: 8182
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cantaloupe
+  namespace: ship-archive
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cantaloupe
+  template:
+    metadata:
+      labels:
+        app: cantaloupe
+    spec:
+      # Kubernetes would otherwise add variables such as CANTALOUPE_PORT for each Service, in a
+      # namespace that Cantaloupe's own settings could be confused with.
+      enableServiceLinks: false
+      containers:
+        - name: cantaloupe
+          image: kiwijos/ship-archive-cantaloupe
+          ports:
+            - name: http
+              containerPort: 8182
+          env:
+            # Cantaloupe reads a setting from the environment under its key in capitals with every
+            # punctuation mark made an underscore: S3Source.endpoint is S3SOURCE_ENDPOINT.
+            - name: S3SOURCE_ENDPOINT
+              value: http://garage:3900
+            # The key that may only read the masters bucket (see k8s/garage/init.py).
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: cantaloupe-s3
+                  key: S3_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cantaloupe-s3
+                  key: S3_SECRET_ACCESS_KEY
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 768Mi
+              ephemeral-storage: 512Mi
+            limits:
+              memory: 1536Mi
+              # The cache volume below plus some room for temporary files. Going over this evicts the pod.
+              ephemeral-storage: 5Gi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # Originals and tiles kept for speed; losing them only makes the next request slower. Cantaloupe
+            # expires them by age, not size, so this is sized for the lifetimes in cantaloupe.properties.
+            - name: cache
+              mountPath: /var/cache/cantaloupe
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir:
+            sizeLimit: 4Gi
