@@ -84,7 +84,7 @@ def make_settings(s3_url):
         values = {
             "database_url": TEST_DATABASE_URL,
             "staff_tokens": STAFF_TOKENS,
-            "service_tokens": "transcribe-worker=worker-token",
+            "service_tokens": "transcribe-worker=worker-token,indexer=indexer-token",
             "rabbitmq_url": RABBITMQ_URL,
             "relay_enabled": False,
             "s3_endpoint_url": s3_url,

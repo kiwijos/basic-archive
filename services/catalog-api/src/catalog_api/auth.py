@@ -74,3 +74,19 @@ def staff_or_service_name(
 ) -> str:
     """For the few reads both staff and the worker need."""
     return any_caller(request, credentials).name
+
+
+def only_service(allowed: str):
+    """A dependency that admits one named service. Another service's valid token is refused with 403,
+    so each service can read only what it was given a name for."""
+
+    def check(
+        request: Request,
+        credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    ) -> str:
+        name = service_name(request, credentials)
+        if name != allowed:
+            raise HTTPException(status_code=403, detail=f"This is for the {allowed} service only")
+        return name
+
+    return check

@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kiwijos/basic-archive/contracts/index.view.schema.json",
+  "title": "index.view",
+  "description": "What catalog-api tells the indexer about one record, ready to be put in the search index.",
+  "oneOf": [{ "$ref": "#/$defs/document" }, { "$ref": "#/$defs/subject" }],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "year": { "type": ["integer", "null"], "minimum": 1, "maximum": 9999 },
+    "strings": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "nullableString": { "type": ["string", "null"] },
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entity", "id", "title", "document_type", "description", "physical_location", "date_text",
+        "year_from", "year_to", "text", "verified", "verified_images", "image_count", "images",
+        "ship_names", "ship_types", "builders", "places"
+      ],
+      "properties": {
+        "entity": { "const": "document" },
+        "id": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string" },
+        "document_type": { "$ref": "#/$defs/nullableString" },
+        "description": { "$ref": "#/$defs/nullableString" },
+        "physical_location": { "$ref": "#/$defs/nullableString" },
+        "date_text": { "$ref": "#/$defs/nullableString" },
+        "year_from": { "$ref": "#/$defs/year" },
+        "year_to": { "$ref": "#/$defs/year" },
+        "text": { "type": "string" },
+        "verified": { "type": "boolean" },
+        "verified_images": { "type": "integer", "minimum": 0 },
+        "image_count": { "type": "integer", "minimum": 0 },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "page_no"],
+            "properties": {
+              "id": { "$ref": "#/$defs/uuid" },
+              "page_no": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        "ship_names": { "$ref": "#/$defs/strings" },
+        "ship_types": { "$ref": "#/$defs/strings" },
+        "builders": { "$ref": "#/$defs/strings" },
+        "places": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entity", "id", "name", "names", "ship_type", "organisation_type", "builders", "places",
+        "year_from", "year_to"
+      ],
+      "properties": {
+        "entity": { "enum": ["ship", "organisation"] },
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "$ref": "#/$defs/nullableString" },
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "name_type", "date_text", "date_from", "date_to", "current"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "name_type": { "enum": ["given", "alias"] },
+              "date_text": { "$ref": "#/$defs/nullableString" },
+              "date_from": { "$ref": "#/$defs/nullableString" },
+              "date_to": { "$ref": "#/$defs/nullableString" },
+              "current": { "type": "boolean" }
+            }
+          }
+        },
+        "ship_type": { "$ref": "#/$defs/nullableString" },
+        "organisation_type": { "$ref": "#/$defs/nullableString" },
+        "builders": { "$ref": "#/$defs/strings" },
+        "places": { "$ref": "#/$defs/strings" },
+        "year_from": { "$ref": "#/$defs/year" },
+        "year_to": { "$ref": "#/$defs/year" }
+      }
+    }
+  }
+}

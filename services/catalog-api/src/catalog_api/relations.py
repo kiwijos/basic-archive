@@ -120,14 +120,14 @@ def apply_facts(relation: Relation, facts: RelationFacts) -> None:
 def announce(session: Session, relation: Relation) -> None:
     """A Relation is part of both Subjects' records, so any change to it changes both."""
     for subject_id in (relation.from_subject_id, relation.to_subject_id):
-        record_changed(session, session.get(Subject, subject_id))
+        record_changed(session, session.get(Subject, subject_id), builder_edit=False)
 
 
 def announce_counterparts(session: Session, subject: Subject) -> None:
     """Call before deleting a Subject: its Relations vanish from the records of the Subjects it was related to."""
     for relation in session.scalars(live_relations(session, subject.id)):
         other_id = relation.to_subject_id if relation.from_subject_id == subject.id else relation.from_subject_id
-        record_changed(session, session.get(Subject, other_id))
+        record_changed(session, session.get(Subject, other_id), builder_edit=False)
 
 
 @router.post("/relations", status_code=201)

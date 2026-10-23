@@ -1,0 +1,29 @@
+[project]
+name = "indexer"
+version = "0.1.0"
+description = "Ship Archive Lite search indexer"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "aio-pika==9.5.5",
+    "fastapi==0.115.6",
+    "httpx==0.28.1",
+    "jsonschema==4.26.0",
+    "pydantic-settings==2.7.0",
+    "uvicorn==0.34.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.4",
+    "pika==1.4.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/indexer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

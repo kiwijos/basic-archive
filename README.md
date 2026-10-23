@@ -17,6 +17,7 @@ make smoke           # exercises the API through the Ingress, Garage, and the OC
 make ocr-parallel    # three workers read ten uploaded pages at once, each exactly once
 make resilience      # restarts RabbitMQ and kills catalog-api at awkward moments
 make e2e             # drives the web UI in a real browser: sign in, upload, correct, leave the queue
+make reindex         # rebuilds the whole search index from the catalog and waits for it
 ```
 
 `make deploy` runs two Jobs each time, both safe to repeat: the database migration, and `garage-init`, which prepares Garage (cluster layout, the `masters` and `derivatives` buckets, one access key per service with only the rights it needs). Garage keeps its data on a 5 Gi volume and runs as a single instance.
@@ -29,11 +30,26 @@ Open `http://localhost` and sign in with a staff token. Print yours with `kubect
 
 An image rebuilt under a tag that is already deployed is not picked up by `make deploy`, and the cluster node keeps its cached copy too. To use a local rebuild, remove the node's copy and restart: `docker exec desktop-control-plane crictl rmi docker.io/kiwijos/ship-archive-<service>:<tag>` then `kubectl -n ship-archive rollout restart deployment/<service>`. Build from the repository root, for example `docker build -f services/catalog-api/Dockerfile -t kiwijos/ship-archive-catalog-api:<tag> .`, because every image copies `contracts/`.
 
+## Search
+
+Every change catalog-api writes also queues a `record.changed` event. The indexer fetches that record's indexing view from catalog-api and upserts it into Meilisearch (a Document with the text of its pages and a verified flag, a Ship or Organisation with every Name it has carried); a record catalog-api no longer has is removed. Handling an event twice leaves the index as it was. search-api answers the public from Meilisearch:
+
+```
+GET /api/search/documents?q=&verified_only=&ship_type=&builder=&place=&document_type=&year_from=&year_to=&page=&page_size=
+GET /api/search/subjects?q=&kind=ship|organisation&ship_type=&builder=&place=&year_from=&year_to=&page=&page_size=
+GET /api/search/suggest?q=
+GET /api/search/facets?scope=documents|subjects&...
+```
+
+Unverified (machine-only) text is searched by default and every Document hit carries `verified`; `verified_only=true` keeps only Documents whose every page has been corrected. A Ship is found by any name it has carried and the hit says which name matched. Highlights come back as `{text, match}` parts, never as markup. Page size is capped at 50, identical queries are cached for 5 seconds, and each client address is limited to 120 requests a minute per pod (`429` with `Retry-After`). Hits link to IIIF image addresses under `/iiif/3`, which Cantaloupe will serve.
+
+`make reindex` rebuilds both indexes from catalog-api (the token that protects `/reindex` stays inside the indexer pod; the endpoint is not exposed by the Ingress). It also removes anything the catalog no longer has. Run it after losing the Meilisearch volume, or to repair events that were dead-lettered. The indexer is a single replica and a reindex holds back new events until it finishes. Index settings live in `contracts/search-index.settings.json` and are applied by the indexer at startup. See [ADR 0005](docs/adr/0005-derived-search-index-and-per-service-keys.md) for the keys: each service gets its own Meilisearch key, derived from the master key.
+
 ## Tests
 
 ```
-make test-db   # throwaway Postgres (port 55432) and RabbitMQ (port 56672)
-make test      # API, worker and web-ui unit tests; the worker tests run real Tesseract
+make test-db   # throwaway Postgres (port 55432), RabbitMQ (port 56672) and Meilisearch (port 57700)
+make test      # API, worker, indexer, search-api and web-ui tests; the worker tests run real Tesseract
 ```
 
 ## Releasing images

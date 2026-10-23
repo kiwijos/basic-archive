@@ -8,6 +8,9 @@ resources:
   - catalog-api.yaml
   - transcribe-worker.yaml
   - web-ui.yaml
+  - meilisearch.yaml
+  - indexer.yaml
+  - search-api.yaml
   - ingress.yaml
 configMapGenerator:
   - name: garage-config
@@ -22,11 +25,20 @@ configMapGenerator:
     namespace: ship-archive
     files:
       - rabbitmq/definitions.json
+  - name: meilisearch-init
+    namespace: ship-archive
+    files:
+      - meilisearch/init.py
+      - meilisearch/keys.json
 # One version tag per slice; every custom image is pinned to it and never uses latest.
 images:
   - name: kiwijos/ship-archive-catalog-api
-    newTag: 0.5.0
+    newTag: 0.6.0
   - name: kiwijos/ship-archive-transcribe-worker
-    newTag: 0.5.0
+    newTag: 0.6.0
   - name: kiwijos/ship-archive-web-ui
-    newTag: 0.5.0
+    newTag: 0.6.0
+  - name: kiwijos/ship-archive-indexer
+    newTag: 0.6.0
+  - name: kiwijos/ship-archive-search-api
+    newTag: 0.6.0

@@ -1,0 +1,218 @@
+{
+  "documents": {
+    "rankingRules": [
+      "words",
+      "typo",
+      "proximity",
+      "attribute",
+      "sort",
+      "exactness",
+      "id:asc"
+    ],
+    "searchableAttributes": [
+      "title",
+      "ship_names",
+      "text",
+      "description",
+      "document_type",
+      "physical_location",
+      "builders",
+      "places"
+    ],
+    "filterableAttributes": [
+      "verified",
+      "ship_types",
+      "builders",
+      "places",
+      "year_from",
+      "year_to",
+      "document_type"
+    ],
+    "sortableAttributes": [
+      "year_from",
+      "title"
+    ],
+    "displayedAttributes": [
+      "*"
+    ],
+    "stopWords": [
+      "och",
+      "i",
+      "på",
+      "av",
+      "att",
+      "en",
+      "ett",
+      "det",
+      "som",
+      "den",
+      "the",
+      "of",
+      "and"
+    ],
+    "synonyms": {
+      "fartyg": [
+        "skepp",
+        "båt"
+      ],
+      "skepp": [
+        "fartyg",
+        "båt"
+      ],
+      "båt": [
+        "fartyg",
+        "skepp"
+      ],
+      "varv": [
+        "skeppsvarv",
+        "varvet"
+      ],
+      "skeppsvarv": [
+        "varv"
+      ],
+      "rederi": [
+        "rederiet"
+      ],
+      "ångare": [
+        "ångfartyg",
+        "steamer"
+      ],
+      "ångfartyg": [
+        "ångare"
+      ],
+      "segelfartyg": [
+        "segelskepp"
+      ],
+      "bark": [
+        "barque"
+      ],
+      "barque": [
+        "bark"
+      ],
+      "brev": [
+        "letter"
+      ],
+      "letter": [
+        "brev"
+      ],
+      "ritning": [
+        "blueprint"
+      ],
+      "blueprint": [
+        "ritning"
+      ]
+    },
+    "typoTolerance": {
+      "enabled": true,
+      "minWordSizeForTypos": {
+        "oneTypo": 4,
+        "twoTypos": 8
+      }
+    },
+    "faceting": {
+      "maxValuesPerFacet": 50,
+      "sortFacetValuesBy": {
+        "*": "count"
+      }
+    },
+    "pagination": {
+      "maxTotalHits": 1000
+    }
+  },
+  "subjects": {
+    "rankingRules": [
+      "words",
+      "typo",
+      "proximity",
+      "attribute",
+      "sort",
+      "exactness",
+      "id:asc"
+    ],
+    "searchableAttributes": [
+      "name",
+      "names",
+      "builders",
+      "places",
+      "ship_type",
+      "organisation_type"
+    ],
+    "filterableAttributes": [
+      "entity",
+      "ship_type",
+      "organisation_type",
+      "builders",
+      "places",
+      "year_from",
+      "year_to"
+    ],
+    "sortableAttributes": [
+      "year_from",
+      "name"
+    ],
+    "displayedAttributes": [
+      "*"
+    ],
+    "stopWords": [
+      "och",
+      "i",
+      "på",
+      "av",
+      "att",
+      "en",
+      "ett",
+      "det",
+      "som",
+      "den",
+      "the",
+      "of",
+      "and"
+    ],
+    "synonyms": {
+      "fartyg": [
+        "skepp",
+        "båt"
+      ],
+      "skepp": [
+        "fartyg",
+        "båt"
+      ],
+      "båt": [
+        "fartyg",
+        "skepp"
+      ],
+      "varv": [
+        "skeppsvarv",
+        "varvet"
+      ],
+      "skeppsvarv": [
+        "varv"
+      ],
+      "rederi": [
+        "rederiet"
+      ],
+      "bark": [
+        "barque"
+      ],
+      "barque": [
+        "bark"
+      ]
+    },
+    "typoTolerance": {
+      "enabled": true,
+      "minWordSizeForTypos": {
+        "oneTypo": 4,
+        "twoTypos": 8
+      }
+    },
+    "faceting": {
+      "maxValuesPerFacet": 50,
+      "sortFacetValuesBy": {
+        "*": "count"
+      }
+    },
+    "pagination": {
+      "maxTotalHits": 1000
+    }
+  }
+}
