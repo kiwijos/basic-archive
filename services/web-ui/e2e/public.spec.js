@@ -83,6 +83,7 @@ test("a document that nobody has checked says it is machine-transcribed, and ver
   await page.getByLabel("Only Documents verified by a person").check();
 
   await expect(unchecked).toHaveCount(0);
+  await expect(page.getByLabel("Only Documents verified by a person")).toBeFocused();
   await expect(page.locator(`.result[data-id="${ids.document}"]`)).toBeVisible();
   await expect(page).toHaveURL(/verified_only=1/);
   await page.reload();
@@ -111,9 +112,10 @@ test("facets narrow the results and the filters survive a reload", async ({ page
   await page.getByLabel("From").fill("1950");
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.getByRole("status")).toContainText("No results");
+  await expect(page.getByLabel("From")).toBeFocused();
 });
 
-test("an old name finds the ship and the result says which name matched", async ({ page }) => {
+test("an old name finds the ship, the result says which name matched, and so does the ship's page", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Ships and organisations" }).click();
   await page.getByLabel("Search the archive").fill(oldName);
@@ -122,7 +124,43 @@ test("an old name finds the ship and the result says which name matched", async 
   const result = page.locator(`.result[data-id="${ids.ship}"]`);
   await expect(result.getByRole("link", { name: newName })).toBeVisible();
   await expect(result.locator(".matched-name")).toContainText(`Matched the former name "${oldName}"`);
-  await expect(result.locator("mark")).toContainText(oldName);
+  await expect(result.locator("mark").first()).toContainText(oldName);
+
+  await result.getByRole("link", { name: newName }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/ships/${ids.ship}\\?`));
+  await expect(page.locator(".matched-note")).toHaveText(`Found by the former name "${oldName}"`);
+  await expect(page.locator(".names li[data-matched]")).toContainText(oldName);
+  await expect(page.locator(".names li[data-matched]")).toContainText("matched your search");
+  await expect(page.locator(".names li.current")).not.toHaveAttribute("data-matched", "true");
+
+  await page.reload();
+  await expect(page.locator(".matched-note")).toBeVisible();
+
+  await page.getByRole("link", { name: "← Back to your search" }).click();
+  await expect(page).toHaveURL(new RegExp(`scope=subjects`));
+  await expect(page.getByLabel("Search the archive")).toHaveValue(oldName);
+  await expect(page.locator(`.result[data-id="${ids.ship}"]`)).toBeVisible();
+});
+
+test("a name in the address that the ship never had is ignored", async ({ page }) => {
+  await page.goto(`/ships/${ids.ship}?name=Titanic`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(newName);
+  await expect(page.locator(".matched-note")).toHaveCount(0);
+  await expect(page.locator(".names li[data-matched]")).toHaveCount(0);
+});
+
+test("a match in a title or a name is highlighted, and a text that did not match shows no snippet", async ({ page }) => {
+  await page.goto(`/?q=${run}`);
+
+  const unchecked = page.locator(`.result[data-id="${ids.unverified}"]`);
+  await expect(unchecked.getByRole("link").locator("mark")).toHaveText(run);
+  await expect(unchecked.locator(".snippet")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Ships and organisations" }).click();
+  await page.getByLabel("Search the archive").fill(sister);
+  await page.getByRole("button", { name: "Search" }).click();
+  await expect(page.locator(`.result[data-id="${ids.sister}"] h2 mark`)).toContainText(sister);
 });
 
 test("suggestions appear as you type, including old names, and open the record", async ({ page }) => {
@@ -136,8 +174,25 @@ test("suggestions appear as you type, including old names, and open the record",
   await box.press("ArrowDown");
   await box.press("Enter");
 
-  await expect(page).toHaveURL(new RegExp(`/ships/${ids.ship}$`));
+  await expect(page).toHaveURL(new RegExp(`/ships/${ids.ship}\\?`));
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(newName);
+  await expect(page.locator(".matched-note")).toHaveText(`Found by the former name "${oldName}"`);
+});
+
+test("pressing Enter closes the suggestions for good, even when a request is still on its way", async ({ page }) => {
+  await page.route("**/api/search/suggest*", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await route.continue();
+  });
+  await page.goto("/");
+  const box = page.getByRole("combobox", { name: "Search the archive" });
+  await box.fill(word);
+  await page.waitForTimeout(300);
+  await box.press("Enter");
+
+  await page.waitForTimeout(1200);
+  await expect(page.getByRole("listbox")).toBeHidden();
+  await expect(box).toHaveAttribute("aria-expanded", "false");
 });
 
 test("a ship's page shows its names with dates and its relations, and a rebuilt-from link leads to the other ship", async ({ page }) => {
@@ -162,6 +217,27 @@ test("a ship's page shows its names with dates and its relations, and a rebuilt-
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(sister);
   await page.getByRole("link", { name: newName }).click();
   await expect(page).toHaveURL(new RegExp(`/ships/${ids.ship}$`));
+});
+
+test("an organisation's page shows its place and what it built, from its own point of view", async ({ page }) => {
+  await page.goto(`/organisations/${ids.yard}`);
+
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(yard);
+  await expect(page.locator(".badge-kind")).toHaveText("Organisation");
+  await expect(page.getByText("Lindholmen")).toBeVisible();
+  await expect(page.locator('[data-predicate="built_by"]')).toContainText(`Built ${newName}`);
+  await page.getByRole("link", { name: newName }).click();
+  await expect(page).toHaveURL(new RegExp(`/ships/${ids.ship}$`));
+
+  await page.goto(`/organisations/${ids.sister}`);
+  await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+});
+
+test("a ship that no document is about says so", async ({ page }) => {
+  await page.goto(`/ships/${ids.sister}`);
+
+  await expect(page.getByText("No documents are linked to this record yet.")).toBeVisible();
+  await expect(page.locator(".names li")).toHaveCount(1);
 });
 
 test("a document's page shows its rights, whether it is verified, its text and the records it is about", async ({ page }) => {

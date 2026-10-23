@@ -16,7 +16,7 @@ make deploy          # creates Secrets if missing, applies everything, waits for
 make smoke           # exercises the API through the Ingress, Garage, and the OCR worker behind it
 make ocr-parallel    # three workers read ten uploaded pages at once, each exactly once
 make resilience      # restarts RabbitMQ and kills catalog-api at awkward moments
-make e2e             # drives the web UI in a real browser: sign in, upload, correct, leave the queue
+make e2e             # drives the web UI in a real browser: the staff review flow, and public search and landing pages
 make reindex         # rebuilds the whole search index from the catalog and waits for it
 ```
 

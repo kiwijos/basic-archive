@@ -107,3 +107,13 @@ export function resultsSummary(total) {
 export function pagerInfo({ page, total_pages: pages }) {
   return { text: `Page ${page} of ${pages}`, hasPrevious: page > 1, hasNext: page < pages };
 }
+
+/** Whether any part of a highlighted text is a match. */
+export function hasMatch(parts) {
+  return Array.isArray(parts) && parts.some((part) => part.match);
+}
+
+/** The searched-for name, if this record has a Name exactly like it; anything else in an address is ignored. */
+export function matchedNameOnPage(name, names) {
+  return name && names.some((n) => n.name === name) ? name : null;
+}

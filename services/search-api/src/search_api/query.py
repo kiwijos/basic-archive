@@ -12,6 +12,19 @@ from search_api import results
 DOCUMENT_FIELDS = {"ship_type": "ship_types", "builder": "builders", "place": "places", "document_type": "document_type"}
 SUBJECT_FIELDS = {"kind": "entity", "ship_type": "ship_type", "builder": "builders", "place": "places"}
 
+# What a result shows. The landing payload (page texts, relations, linked Documents) stays in the index,
+# and a Document's text is cropped by Meilisearch for the snippet without being sent.
+RETRIEVE = {
+    "documents": [
+        "id", "title", "document_type", "date_text", "year_from", "year_to", "verified", "verified_images",
+        "image_count", "ship_names", "images.id", "images.page_no",
+    ],
+    "subjects": [
+        "id", "entity", "name", "name_details", "ship_type", "organisation_type", "builders", "places",
+        "year_from", "year_to",
+    ],
+}
+
 FACETS = {
     "documents": ["ship_types", "builders", "places", "verified", "document_type", "year_from", "year_to"],
     "subjects": ["entity", "ship_type", "builders", "places", "organisation_type", "year_from", "year_to"],
@@ -54,6 +67,7 @@ class Search:
             "q": self.q,
             "filter": self.meili_filter(),
             "facets": FACETS[self.scope],
+            "attributesToRetrieve": RETRIEVE[self.scope],
             "page": self.page,
             "hitsPerPage": self.page_size if hits else 0,
             "highlightPreTag": results.START,

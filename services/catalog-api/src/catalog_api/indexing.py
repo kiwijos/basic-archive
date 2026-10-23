@@ -11,8 +11,9 @@ from catalog_api.contracts import validate
 from catalog_api.db import get_session
 from catalog_api.dates import present
 from catalog_api.documents import document_fields, find_document
-from catalog_api.models import Document, DocumentSubject, Organisation, Relation, Ship, Subject
-from catalog_api.names import current_name, current_name_row, names_of
+from catalog_api.verification import readings_of
+from catalog_api.models import Document, DocumentSubject, Image, Organisation, Relation, Ship, Subject
+from catalog_api.names import current_name_row, current_names, names_of
 from catalog_api.organisations import find_organisation
 from catalog_api.relations import live_relations
 from catalog_api.ships import find_ship
@@ -43,9 +44,10 @@ def document_view(session: Session, document_id: uuid.UUID) -> dict:
     for link in fields["subjects"]:
         if link.kind != "ship":
             continue
-        view = subject_view(session, "ship", link.subject_id)
-        ship_names += [name["name"] for name in view["names"] if name["name"] not in ship_names]
-        for target, values in ((ship_types, [view["ship_type"]]), (builders, view["builders"]), (places, view["places"])):
+        subject, ship = find_ship(session, link.subject_id)
+        facts = built_facts(session, subject.id, ship)
+        ship_names += [name.name for name in names_of(session, subject.id) if name.name not in ship_names]
+        for target, values in ((ship_types, [ship.ship_type]), (builders, facts["builders"]), (places, facts["places"])):
             target += [value for value in values if value and value not in target]
     return {
         "entity": "document",
@@ -105,13 +107,16 @@ def built_facts(session: Session, ship_id: uuid.UUID, ship: Ship) -> dict:
             Relation.predicate == "built_by", Relation.from_subject_id == ship_id
         )
     ).all()
+    yard_ids = [relation.to_subject_id for relation in relations]
+    names = current_names(session, yard_ids)
+    yard_places = dict(
+        session.execute(select(Organisation.subject_id, Organisation.place).where(Organisation.subject_id.in_(yard_ids))).all()
+    ) if yard_ids else {}
     for relation in relations:
-        name = current_name(session, relation.to_subject_id)
+        name = names[relation.to_subject_id]
         if name and name not in builders:
             builders.append(name)
-        place = relation.place or session.scalar(
-            select(Organisation.place).where(Organisation.subject_id == relation.to_subject_id)
-        )
+        place = relation.place or yard_places.get(relation.to_subject_id)
         if place and place not in places:
             places.append(place)
         start, end = _years(relation.date_from, relation.date_to)
@@ -142,20 +147,22 @@ def _uncertain(value) -> dict | None:
 
 def relations_of(session: Session, subject_id: uuid.UUID) -> list[dict]:
     """A Subject's live Relations in both directions, each naming the Subject at the other end."""
+    relations = session.scalars(live_relations(session, subject_id)).all()
+    other_ids = [r.to_subject_id if r.from_subject_id == subject_id else r.from_subject_id for r in relations]
+    kinds = dict(session.execute(select(Subject.id, Subject.kind).where(Subject.id.in_(other_ids))).all()) if other_ids else {}
+    names = current_names(session, other_ids)
     found = []
-    for relation in session.scalars(live_relations(session, subject_id)):
-        outgoing = relation.from_subject_id == subject_id
-        other_id = relation.to_subject_id if outgoing else relation.from_subject_id
+    for relation, other_id in zip(relations, other_ids):
         found.append(
             (
                 (relation.date_from or date.min, relation.created_at),
                 {
                     "predicate": relation.predicate,
                     # "from": this Subject is the one the predicate is about (it was built_by ...).
-                    "direction": "from" if outgoing else "to",
+                    "direction": "from" if relation.from_subject_id == subject_id else "to",
                     "other_id": str(other_id),
-                    "other_kind": session.get(Subject, other_id).kind,
-                    "other_name": current_name(session, other_id),
+                    "other_kind": kinds[other_id],
+                    "other_name": names[other_id],
                     "place": relation.place,
                     "date_text": relation.date_text,
                     "date_from": _iso(relation.date_from),
@@ -175,12 +182,22 @@ def linked_documents(session: Session, subject_id: uuid.UUID) -> list[dict]:
         .order_by(Document.created_at)
         .limit(MAX_LINKED_DOCUMENTS)
     ).all()
+    if not documents:
+        return []
+    # Whether each is verified, from two queries for all of them: a Document is verified only when it
+    # has Images and every one has a Human transcription.
+    images: dict[uuid.UUID, list[uuid.UUID]] = {document.id: [] for document in documents}
+    for document_id, image_id in session.execute(
+        select(Image.document_id, Image.id).where(Image.document_id.in_(images), Image.deleted_at.is_(None))
+    ):
+        images[document_id].append(image_id)
+    readings = readings_of(session, [i for ids in images.values() for i in ids])
     return [
         {
             "id": str(document.id),
             "title": document.title,
             "document_type": document.document_type,
-            "verified": document_fields(session, document)["verified"],
+            "verified": bool(images[document.id]) and all(readings[i].verified for i in images[document.id]),
         }
         for document in documents
     ]

@@ -335,3 +335,47 @@ def test_what_a_landing_page_shows_is_announced_again_when_it_changes(client, st
     before = len(outbox())
     correct(client, staff, document["images"][0]["id"], "text")
     assert ("ship", yard["ship"], "upsert") in outbox()[before:]  # it lists the Document and whether it is verified
+
+
+def count_queries(client, path):
+    """How many SQL statements serving this request takes."""
+    from sqlalchemy import event
+
+    engine = client.app.state.engine
+    statements = []
+    listener = lambda *args, **kwargs: statements.append(1)  # noqa: E731
+    event.listen(engine, "before_cursor_execute", listener)
+    try:
+        assert client.get(f"{API}{path}", headers=INDEXER).status_code == 200
+    finally:
+        event.remove(engine, "before_cursor_execute", listener)
+    return len(statements)
+
+
+def many_documents_about(client, staff, ship, count):
+    ids = []
+    for n in range(count):
+        document = upload(client, staff, title=f"Brev {n}").json()
+        link(client, staff, document["id"], ship)
+        ids.append(document["id"])
+    return ids
+
+
+def test_building_a_view_does_not_cost_more_for_each_document_a_ship_has(client, staff, yard):
+    few = many_documents_about(client, staff, yard["ship"], 2)
+    document_few = count_queries(client, f"/index/document/{few[0]}")
+    ship_few = count_queries(client, f"/index/ship/{yard['ship']}")
+
+    many_documents_about(client, staff, yard["ship"], 8)
+
+    assert count_queries(client, f"/index/document/{few[0]}") == document_few
+    assert count_queries(client, f"/index/ship/{yard['ship']}") == ship_few
+
+
+def test_building_a_ships_view_does_not_cost_more_for_each_relation_it_has(client, staff, yard):
+    before = count_queries(client, f"/index/ship/{yard['ship']}")
+    for n in range(6):
+        other = client.post(f"{API}/ships", json={"name": f"Syster {n}"}, headers=staff).json()["id"]
+        client.post(f"{API}/relations", json={"from_subject_id": other, "predicate": "rebuilt_from", "to_subject_id": yard["ship"]}, headers=staff)
+
+    assert count_queries(client, f"/index/ship/{yard['ship']}") == before

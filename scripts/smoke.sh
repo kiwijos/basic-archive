@@ -307,6 +307,7 @@ doomed=$(api POST /ships "{\"name\":\"Doomed $run\"}" | jq -r .id)
 search_for /subjects "any(.hits[]; .id == \"$doomed\")" 30 --data-urlencode "q=Doomed $run" || fail "the new ship never reached search"
 api DELETE "/ships/$doomed" >/dev/null || fail "deleting the ship failed"
 search_for /subjects "any(.hits[]; .id == \"$doomed\") | not" 30 --data-urlencode "q=Doomed $run" || fail "the deleted ship is still searchable"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/search/subjects/$doomed")" = 404 ] || fail "the deleted ship still has a landing record"
 
 # Page size is capped and repeated queries are served from the cache.
 [ "$(curl -sfG "$BASE_URL/api/search/documents" --data-urlencode page_size=5000 | jq '.page_size')" = 50 ] || fail "the page size was not capped at 50"

@@ -1,7 +1,8 @@
 import { h } from "../dom.js";
-import { pathFor, pathForRecord } from "../router.js";
+import { recordPath } from "../record-context.js";
+import { pathFor } from "../router.js";
 import { clearFilters, hasFilters, parseSearch, searchQuery, toggleValue, withChange } from "../search-state.js";
-import { facetOptions, facetTitle, matchedNameNote, pagerInfo, resultsSummary, verification, yearsText } from "../view-models.js";
+import { facetOptions, facetTitle, hasMatch, matchedNameNote, pagerInfo, resultsSummary, verification, yearsText } from "../view-models.js";
 import { highlighted, link, verificationBadge } from "../widgets.js";
 
 const SUGGEST_DELAY_MS = 200;
@@ -24,6 +25,7 @@ export function searchView({ api, navigate, setTitle }) {
   let request = 0;
   let disposed = false;
   let suggestTimer;
+  let suggestSeq = 0; // a response is used only if nothing closed or restarted the suggestions since it was asked for
   let suggestions = [];
   let active = -1;
   let refocus = null;
@@ -52,6 +54,7 @@ export function searchView({ api, navigate, setTitle }) {
 
   // ---- suggestions -------------------------------------------------------------------------------------------------
   function closeSuggestions() {
+    suggestSeq += 1;
     suggestions = [];
     active = -1;
     list.hidden = true;
@@ -87,7 +90,7 @@ export function searchView({ api, navigate, setTitle }) {
 
   function choose(item) {
     closeSuggestions();
-    navigate(pathForRecord(item.type, item.id));
+    navigate(recordPath(item.type, item.id, { search: searchQuery(state), matchedName: item.matched_name && item.matched_name !== item.text ? item.matched_name : null }));
   }
 
   function askForSuggestions() {
@@ -97,10 +100,12 @@ export function searchView({ api, navigate, setTitle }) {
       closeSuggestions();
       return;
     }
+    suggestSeq += 1;
+    const mine = suggestSeq;
     suggestTimer = setTimeout(async () => {
       try {
         const found = (await api.suggest(text)).suggestions;
-        if (disposed || input.value.trim() !== text) return;
+        if (disposed || mine !== suggestSeq) return;
         suggestions = found;
         active = -1;
         paintSuggestions();
@@ -157,7 +162,7 @@ export function searchView({ api, navigate, setTitle }) {
     const verifiedId = idFor("verified");
     const fromId = idFor("year-from");
     const toId = idFor("year-to");
-    const from = h("input", { id: fromId, type: "number", min: 1, max: 9999, inputmode: "numeric", placeholder: stats.year_from ? String(stats.year_from.min) : "" });
+    const from = h("input", { id: fromId, "data-control": "year-from", type: "number", min: 1, max: 9999, inputmode: "numeric", placeholder: stats.year_from ? String(stats.year_from.min) : "" });
     const to = h("input", { id: toId, type: "number", min: 1, max: 9999, inputmode: "numeric", placeholder: stats.year_to ? String(stats.year_to.max) : "" });
     from.value = state.yearFrom ?? "";
     to.value = state.yearTo ?? "";
@@ -168,9 +173,9 @@ export function searchView({ api, navigate, setTitle }) {
             "div",
             { class: "check" },
             h("input", {
-              id: verifiedId, type: "checkbox", checked: state.verifiedOnly,
+              id: verifiedId, type: "checkbox", checked: state.verifiedOnly, "data-control": "verified",
               onchange: (event) => {
-                refocus = { id: verifiedId };
+                refocus = { control: "verified" };
                 go(withChange(state, { verifiedOnly: event.target.checked }));
               },
             }),
@@ -183,7 +188,7 @@ export function searchView({ api, navigate, setTitle }) {
           class: "years",
           onsubmit: (event) => {
             event.preventDefault();
-            refocus = { id: fromId };
+            refocus = { control: "year-from" };
             go(withChange(state, { yearFrom: from.value ? Number(from.value) : null, yearTo: to.value ? Number(to.value) : null }));
           },
         },
@@ -231,24 +236,28 @@ export function searchView({ api, navigate, setTitle }) {
   }
 
   // ---- results -----------------------------------------------------------------------------------------------------
+  const context = () => searchQuery(state);
+
   function documentResult(hit) {
     const date = hit.date_text || yearsText(hit.year_from, hit.year_to);
     return h(
       "li",
       { class: "result", "data-kind": "document", "data-id": hit.id },
-      h("h2", {}, link(navigate, pathForRecord("document", hit.id), hit.title)),
+      h("h2", {}, link(navigate, recordPath("document", hit.id, { search: context() }), hasMatch(hit.highlights.title) ? highlighted(hit.highlights.title) : hit.title)),
       h("p", { class: "meta" }, verificationBadge(verification(hit)), [hit.document_type, date, hit.ship_names.slice(0, 3).join(", ")].filter(Boolean).map((part) => h("span", {}, part))),
-      hit.highlights.text.length ? h("p", { class: "snippet" }, highlighted(hit.highlights.text)) : null,
+      // The start of a text where nothing matched would look like the reason it was found, so it is left out.
+      hasMatch(hit.highlights.text) ? h("p", { class: "snippet" }, highlighted(hit.highlights.text)) : null,
     );
   }
 
   function subjectResult(hit) {
     const note = matchedNameNote(hit);
     const years = yearsText(hit.year_from, hit.year_to);
+    const path = recordPath(hit.entity, hit.id, { search: context(), matchedName: note ? hit.matched_name : null });
     return h(
       "li",
       { class: "result", "data-kind": hit.entity, "data-id": hit.id },
-      h("h2", {}, link(navigate, pathForRecord(hit.entity, hit.id), hit.name)),
+      h("h2", {}, link(navigate, path, hasMatch(hit.highlights.name) ? highlighted(hit.highlights.name) : hit.name)),
       note ? h("p", { class: "matched-name" }, note, hit.highlights.names.length ? [": ", h("span", { class: "matched" }, highlighted(hit.highlights.names))] : null) : null,
       h("p", { class: "meta" }, h("span", { class: "badge badge-kind" }, KIND_NAMES[hit.entity]), [hit.ship_type ?? hit.organisation_type, years, hit.builders.length ? `Built by ${hit.builders.join(", ")}` : "", hit.places.join(", ")].filter(Boolean).map((part) => h("span", {}, part))),
     );
@@ -273,7 +282,7 @@ export function searchView({ api, navigate, setTitle }) {
 
   function restoreFocus() {
     if (!refocus) return;
-    const target = refocus.id ? document.getElementById(refocus.id) : refocus.facet ? facets.querySelector(`[data-facet="${CSS.escape(refocus.facet)}"]`) : pager.querySelector("a");
+    const target = refocus.control ? filters.querySelector(`[data-control="${refocus.control}"]`) : refocus.facet ? facets.querySelector(`[data-facet="${CSS.escape(refocus.facet)}"]`) : pager.querySelector("a");
     target?.focus();
     refocus = null;
   }

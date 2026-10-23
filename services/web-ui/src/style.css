@@ -132,3 +132,7 @@ mark { background: #fff1a8; color: inherit; padding: 0 .1em; border-radius: 2px;
 @media (max-width: 52rem) {
   .search-layout { grid-template-columns: 1fr; }
 }
+
+.matched-note { font-weight: 600; margin: .25rem 0; }
+.names li.matched { background: #fff1a8; padding: .1rem .35rem; border-radius: 3px; }
+.badge-matched { color: var(--waiting); margin-left: .5rem; }

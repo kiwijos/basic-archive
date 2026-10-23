@@ -41,17 +41,32 @@ def names_of(session: Session, subject_id: uuid.UUID) -> list[SubjectName]:
     return sorted(names, key=lambda n: (n.date_from or date.min, n.date_to or date.max, n.created_at))
 
 
-def current_name_row(session: Session, subject_id: uuid.UUID) -> SubjectName | None:
+def _current_of(rows: list[SubjectName]) -> SubjectName | None:
     """The given Name with no end date, or else the one that ended last."""
-    names = [n for n in names_of(session, subject_id) if n.name_type == "given"]
-    if not names:
+    given = [n for n in rows if n.name_type == "given"]
+    if not given:
         return None
-    return max(names, key=lambda n: (n.date_to or date.max, n.date_from or date.min, n.created_at))
+    return max(given, key=lambda n: (n.date_to or date.max, n.date_from or date.min, n.created_at))
+
+
+def current_name_row(session: Session, subject_id: uuid.UUID) -> SubjectName | None:
+    return _current_of(names_of(session, subject_id))
 
 
 def current_name(session: Session, subject_id: uuid.UUID) -> str | None:
     row = current_name_row(session, subject_id)
     return row.name if row else None
+
+
+def current_names(session: Session, subject_ids: list[uuid.UUID]) -> dict[uuid.UUID, str | None]:
+    """The current Name of each Subject, from one query however many Subjects there are."""
+    grouped: dict[uuid.UUID, list[SubjectName]] = {subject_id: [] for subject_id in subject_ids}
+    if subject_ids:
+        for name in session.scalars(
+            select(SubjectName).where(SubjectName.subject_id.in_(subject_ids), SubjectName.deleted_at.is_(None))
+        ):
+            grouped[name.subject_id].append(name)
+    return {subject_id: (row.name if (row := _current_of(rows)) else None) for subject_id, rows in grouped.items()}
 
 
 def find_subject(session: Session, subject_id: uuid.UUID) -> Subject:

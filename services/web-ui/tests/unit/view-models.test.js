@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  facetOptions, facetTitle, imageVerification, matchedNameNote, nameTimeline, pagerInfo, periodText, relationSentence, resultsSummary, rightsInfo, verification, yearsText,
+  facetOptions, facetTitle, hasMatch, imageVerification, matchedNameNote, nameTimeline, pagerInfo, periodText, relationSentence, resultsSummary, rightsInfo, verification, yearsText,
 } from "../../src/view-models.js";
 
 test("a Document is called verified only when a person has checked every page", () => {
@@ -118,4 +118,11 @@ test("the number of results and the page are put into words", () => {
   assert.deepEqual(pagerInfo({ page: 2, total_pages: 5 }), { text: "Page 2 of 5", hasPrevious: true, hasNext: true });
   assert.deepEqual(pagerInfo({ page: 1, total_pages: 1 }), { text: "Page 1 of 1", hasPrevious: false, hasNext: false });
   assert.deepEqual(pagerInfo({ page: 3, total_pages: 3 }), { text: "Page 3 of 3", hasPrevious: true, hasNext: false });
+});
+
+test("a snippet is worth showing as a match only when something in it matched", () => {
+  assert.equal(hasMatch([{ text: "Skeppet ", match: false }, { text: "Vega", match: true }]), true);
+  assert.equal(hasMatch([{ text: "Inledning utan träff", match: false }]), false);
+  assert.equal(hasMatch([]), false);
+  assert.equal(hasMatch(undefined), false);
 });

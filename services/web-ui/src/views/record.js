@@ -1,6 +1,7 @@
 import { h } from "../dom.js";
 import { pathFor, pathForRecord } from "../router.js";
-import { imageVerification, nameTimeline, periodText, relationSentence, rightsInfo, verification, yearsText } from "../view-models.js";
+import { readContext } from "../record-context.js";
+import { imageVerification, matchedNameOnPage, nameTimeline, periodText, relationSentence, rightsInfo, verification, yearsText } from "../view-models.js";
 import { link, verificationBadge } from "../widgets.js";
 
 const KIND_NAMES = { ship: "Ship", organisation: "Organisation", document: "Document" };
@@ -60,10 +61,12 @@ function documentPage({ record, navigate }) {
 }
 
 /** A Ship's or Organisation's own page: its names over time, its relations to other records, and the Documents about it. */
-function subjectPage({ record, navigate, kind }) {
+function subjectPage({ record, navigate, kind, matchedName }) {
   const names = nameTimeline(record.names);
   const years = yearsText(record.year_from, record.year_to);
   const former = names.filter((n) => !n.current);
+  const found = matchedNameOnPage(matchedName, record.names);
+  const matched = found && !record.names.some((n) => n.current && n.name === found) ? found : null;
   const kindOf = record.ship_type ?? record.organisation_type;
   return [
     h("h1", {}, record.name ?? "Unnamed"),
@@ -79,8 +82,17 @@ function subjectPage({ record, navigate, kind }) {
       "section",
       { "aria-labelledby": "names" },
       h("h2", { id: "names" }, former.length ? "Names over time" : "Name"),
+      // Reached by searching for an old name: say so, and mark that name in the list.
+      matched ? h("p", { class: "matched-note" }, `Found by the former name "${matched}"`) : null,
       h("ol", { class: "names" }, names.map((n) =>
-        h("li", { class: n.current ? "current" : "" }, h("strong", {}, n.name), n.period ? ` ${n.period}` : "", n.current ? h("span", { class: "badge badge-current" }, "current name") : null),
+        h(
+          "li",
+          { class: [n.current ? "current" : "", n.name === matched ? "matched" : ""].join(" ").trim(), "data-matched": n.name === matched ? "true" : null },
+          h("strong", {}, n.name),
+          n.period ? ` ${n.period}` : "",
+          n.current ? h("span", { class: "badge badge-current" }, "current name") : null,
+          n.name === matched ? h("span", { class: "badge badge-matched" }, "matched your search") : null,
+        ),
       )),
     ),
     record.relations.length
@@ -124,7 +136,8 @@ function subjectPage({ record, navigate, kind }) {
 export function recordView({ api, navigate, setTitle, kind, id }) {
   let disposed = false;
   const body = h("div", {}, h("p", { role: "status" }, "Loading…"));
-  const back = h("p", { class: "back" }, link(navigate, pathFor("search"), "← Search the archive"));
+  const context = readContext(location.search);
+  const back = h("p", { class: "back" }, link(navigate, context.back, context.back === pathFor("search") ? "← Search the archive" : "← Back to your search"));
 
   (async () => {
     try {
@@ -133,7 +146,7 @@ export function recordView({ api, navigate, setTitle, kind, id }) {
       // A Ship's address shows a Ship; an Organisation's id at a Ship's address is not found.
       if (kind !== "document" && record.entity !== kind) throw Object.assign(new Error("That page does not exist."), { status: 404 });
       setTitle(record.title ?? record.name ?? "Record");
-      body.replaceChildren(...(kind === "document" ? documentPage({ record, navigate }) : subjectPage({ record, navigate, kind })).filter(Boolean));
+      body.replaceChildren(...(kind === "document" ? documentPage({ record, navigate }) : subjectPage({ record, navigate, kind, matchedName: context.name })).filter(Boolean));
     } catch (error) {
       if (disposed) return;
       setTitle(error.status === 404 ? "Not found" : "Problem");
