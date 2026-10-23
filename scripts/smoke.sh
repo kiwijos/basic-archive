@@ -223,7 +223,7 @@ rm -f "$content_headers"
 status=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/catalog/images/$image/content")
 [ "$status" = 401 ] || fail "the scan was served without a token ($status)"
 
-corrected="Skeppet Vega lämnade Göteborg den 14 mars 1891."
+corrected="Skeppet Vega lämnade Göteborg den 14 mars 1891. Ref zebrafink$run"
 api POST "/images/$image/transcriptions" "{\"source\":\"human\",\"text\":\"$corrected\"}" >/dev/null || fail "saving a correction failed"
 api GET "/images/$image" | jq -e --arg text "$corrected" '.verified and .review_status == "verified" and .text_source == "human" and .current_text == $text' >/dev/null \
   || fail "the corrected Image is not verified with the corrected text"
@@ -248,4 +248,56 @@ queue_item "$document" >/dev/null && fail "a fully verified Document is still in
 deep=$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "$BASE_URL/documents/$document/review")
 [ "$deep" = "200 text/html" ] || fail "a deep UI address did not fall back to the app: $deep"
 
-echo "SMOKE OK: ship $id created and read back as $staff_name; renames, sale, rebuild, validation and delete verified; Image uploaded to Garage, duplicate flagged, link read back, download address works and expires, key rights verified; page read automatically at $accuracy accuracy, corrupt image failed into the dead-letter queue, re-read works; page added, scan served, correction verified and kept beside the readings, review queue counts right, web UI served with deep links"
+# Search: the corrected document is found, flagged verified, within seconds of its last correction.
+# Every poll carries a changing parameter, so the 5 second answer cache cannot hide a stale index.
+search_for() { # search_for PATH JQ_FILTER SECONDS [curl --data-urlencode args...]: succeed once the answer satisfies the filter
+  local path=$1 filter=$2 seconds=$3; shift 3
+  local deadline=$((SECONDS + seconds))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    curl -sfG "$BASE_URL/api/search$path" --data-urlencode "_=$SECONDS$RANDOM" "$@" | jq -e "$filter" >/dev/null && return 0
+    sleep 1
+  done
+  return 1
+}
+yard=$(api POST /organisations "{\"name\":\"Yard $run\",\"place\":\"Lindholmen\"}" | jq -r .id)
+api POST /relations "{\"from_subject_id\":\"$ship\",\"predicate\":\"built_by\",\"to_subject_id\":\"$yard\",\"date\":{\"date_from\":\"1889-06-01\",\"date_to\":\"1890-03-01\"}}" >/dev/null \
+  || fail "recording the builder failed"
+second_document=$(echo "$second" | jq -r .id)
+
+search_for /documents "any(.hits[]; .id == \"$document\" and .verified == true and .verified_images == 2)" 30 --data-urlencode "q=$run" --data-urlencode page_size=50 \
+  || fail "the corrected Document did not appear in search flagged verified"
+search_for /documents "any(.hits[]; .id == \"$second_document\" and .verified == false)" 30 --data-urlencode "q=$run" --data-urlencode page_size=50 \
+  || fail "the unverified Document is not returned by default with verified false"
+search_for /documents "any(.hits[]; .id == \"$second_document\") | not" 5 --data-urlencode "q=$run" --data-urlencode page_size=50 --data-urlencode verified_only=true \
+  || fail "the unverified Document is still returned under verified-only"
+search_for /documents "any(.hits[]; .id == \"$document\")" 5 --data-urlencode "q=$run" --data-urlencode page_size=50 --data-urlencode verified_only=true \
+  || fail "the verified Document is missing under verified-only"
+
+# The words of the correction are what is searched, and the answer highlights them.
+search_for /documents "any(.hits[]; .id == \"$document\" and any(.highlights.text[]; .match and (.text | ascii_downcase | contains(\"zebrafink$run\"))))" 30 \
+  --data-urlencode "q=zebrafink$run" || fail "the corrected text was not searchable"
+
+# A ship is found by an old name, and the answer says which name matched.
+search_for /subjects "any(.hits[]; .id == \"$ship\" and .name == \"Nordstjernan\" and .matched_name == \"Vega $run\")" 30 --data-urlencode "q=Vega $run" \
+  || fail "the ship was not found by its old name with the matching name shown"
+# Builder and year come from the Relation: they filter the ship, and the document that shows it.
+search_for /subjects "any(.hits[]; .id == \"$ship\" and .builders == [\"Yard $run\"] and .year_from == 1889)" 30 \
+  --data-urlencode "q=Vega $run" --data-urlencode "builder=Yard $run" --data-urlencode year_from=1889 --data-urlencode year_to=1890 \
+  || fail "the ship was not found by builder and year derived from its Relation"
+search_for /documents "any(.hits[]; .id == \"$document\")" 30 --data-urlencode "q=$run" --data-urlencode "builder=Yard $run" --data-urlencode place=Lindholmen \
+  || fail "the document was not found by the builder and place of the ship it shows"
+
+# A deleted record leaves the index.
+doomed=$(api POST /ships "{\"name\":\"Doomed $run\"}" | jq -r .id)
+search_for /subjects "any(.hits[]; .id == \"$doomed\")" 30 --data-urlencode "q=Doomed $run" || fail "the new ship never reached search"
+api DELETE "/ships/$doomed" >/dev/null || fail "deleting the ship failed"
+search_for /subjects "any(.hits[]; .id == \"$doomed\") | not" 30 --data-urlencode "q=Doomed $run" || fail "the deleted ship is still searchable"
+
+# Page size is capped and repeated queries are served from the cache.
+[ "$(curl -sfG "$BASE_URL/api/search/documents" --data-urlencode page_size=5000 | jq '.page_size')" = 50 ] || fail "the page size was not capped at 50"
+cache_probe="cache-$run"
+first_cache=$(curl -sG -D - -o /dev/null "$BASE_URL/api/search/documents" --data-urlencode "q=$cache_probe" | tr -d '\r' | awk -F': ' 'tolower($1) == "x-cache" {print $2}')
+second_cache=$(curl -sG -D - -o /dev/null "$BASE_URL/api/search/documents" --data-urlencode "q=$cache_probe" | tr -d '\r' | awk -F': ' 'tolower($1) == "x-cache" {print $2}')
+[ "$first_cache,$second_cache" = "MISS,HIT" ] || fail "repeated queries were not cached: $first_cache,$second_cache"
+
+echo "SMOKE OK: ship $id created and read back as $staff_name; renames, sale, rebuild, validation and delete verified; Image uploaded to Garage, duplicate flagged, link read back, download address works and expires, key rights verified; page read automatically at $accuracy accuracy, corrupt image failed into the dead-letter queue, re-read works; page added, scan served, correction verified and kept beside the readings, review queue counts right, web UI served with deep links; search finds the corrected document verified, the unverified one only by default, a ship by its old name, builder and year from Relations, deletes leave the index, page size capped, cache hits"

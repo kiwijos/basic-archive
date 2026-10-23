@@ -1,0 +1,18 @@
+[
+  {
+    "uid": "6f1c1b9e-4a3d-4a52-9b1e-1d7c6a0f0001",
+    "name": "indexer",
+    "description": "Writes the search indexes. Cannot search, read keys or touch other indexes.",
+    "actions": ["documents.add", "documents.delete", "documents.get", "indexes.create", "indexes.get", "settings.get", "settings.update", "tasks.get"],
+    "indexes": ["documents", "subjects"],
+    "expiresAt": null
+  },
+  {
+    "uid": "6f1c1b9e-4a3d-4a52-9b1e-1d7c6a0f0002",
+    "name": "search",
+    "description": "Search only. Cannot read documents by id, write, or change settings.",
+    "actions": ["search"],
+    "indexes": ["documents", "subjects"],
+    "expiresAt": null
+  }
+]

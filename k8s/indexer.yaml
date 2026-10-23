@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: indexer
+  namespace: ship-archive
+spec:
+  # One consumer keeps changes in order and lets a reindex pause them; it is stateless, so a restart loses nothing.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: indexer
+  template:
+    metadata:
+      labels:
+        app: indexer
+    spec:
+      containers:
+        - name: indexer
+          image: kiwijos/ship-archive-indexer
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: indexer-env
+          env:
+            - name: CATALOG_API_URL
+              value: http://catalog-api:8000
+            - name: MEILI_URL
+              value: http://meilisearch:7700
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+---
+# Only inside the cluster: /reindex is reached with `make reindex`, never through the Ingress.
+apiVersion: v1
+kind: Service
+metadata:
+  name: indexer
+  namespace: ship-archive
+spec:
+  selector:
+    app: indexer
+  ports:
+    - port: 8080
+      targetPort: http

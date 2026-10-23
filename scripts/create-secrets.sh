@@ -117,4 +117,67 @@ stringData:
 EOF
 fi
 
+# Search: Meilisearch has a master key, and each service gets a key of its own that can do only what
+# it needs (k8s/meilisearch/keys.json). A key is derived from the master key and the key's uid, so
+# it can be worked out here, and a Job registers the same keys in Meilisearch.
+meili_key() { # meili_key NAME: the key for that entry of keys.json; the master key is read from stdin
+  local uid
+  uid=$(jq -r --arg name "$1" '.[] | select(.name == $name) | .uid' "$(dirname "$0")/../k8s/meilisearch/keys.json")
+  python3 -c 'import hashlib, hmac, sys; print(hmac.new(sys.stdin.read().strip().encode(), sys.argv[1].encode(), hashlib.sha256).hexdigest())' "$uid"
+}
+secret_value() { kubectl -n "$NAMESPACE" get secret "$1" -o jsonpath="{.data.$2}" | base64 -d; }
+
+if missing meilisearch-secrets; then
+  kubectl -n "$NAMESPACE" create -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: meilisearch-secrets
+type: Opaque
+stringData:
+  MEILI_MASTER_KEY: "$(openssl rand -hex 32)"
+EOF
+fi
+
+if missing indexer-env; then
+  # The indexer reads catalog-api as a service of its own, so catalog-api must accept its token. If an
+  # earlier run got as far as registering the token but not as far as writing indexer-env, reuse it.
+  tokens=$(secret_value catalog-api-service-tokens SERVICE_TOKENS)
+  existing=$(printf '%s' "$tokens" | tr ',' '\n' | grep '^indexer=' | head -1 || true)
+  if [ -n "$existing" ]; then
+    INDEXER_TOKEN=${existing#indexer=}
+  else
+    INDEXER_TOKEN=$(random)
+    printf '%s' "${tokens},indexer=${INDEXER_TOKEN}" | kubectl -n "$NAMESPACE" create secret generic catalog-api-service-tokens \
+      --from-file=SERVICE_TOKENS=/dev/stdin --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    # Pods read their tokens when they start.
+    kubectl -n "$NAMESPACE" rollout restart deployment/catalog-api >/dev/null 2>&1 || true
+  fi
+  INDEXER_MEILI_KEY=$(secret_value meilisearch-secrets MEILI_MASTER_KEY | meili_key indexer)
+  kubectl -n "$NAMESPACE" create -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: indexer-env
+type: Opaque
+stringData:
+  RABBITMQ_URL: "$(secret_value catalog-api-amqp RABBITMQ_URL)"
+  CATALOG_API_TOKEN: "$INDEXER_TOKEN"
+  MEILI_KEY: "$INDEXER_MEILI_KEY"
+  REINDEX_TOKEN: "$(random)"
+EOF
+fi
+
+if missing search-api-env; then
+  kubectl -n "$NAMESPACE" create -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: search-api-env
+type: Opaque
+stringData:
+  MEILI_KEY: "$(secret_value meilisearch-secrets MEILI_MASTER_KEY | meili_key search)"
+EOF
+fi
+
 echo "Secrets are in place."

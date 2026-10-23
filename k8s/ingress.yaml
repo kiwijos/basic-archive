@@ -15,6 +15,13 @@ spec:
                 name: catalog-api
                 port:
                   number: 8000
+          - path: /api/search
+            pathType: Prefix
+            backend:
+              service:
+                name: search-api
+                port:
+                  number: 8000
           - path: /
             pathType: Prefix
             backend:

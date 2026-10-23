@@ -1,0 +1,141 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: meilisearch
+  namespace: ship-archive
+spec:
+  clusterIP: None
+  selector:
+    app: meilisearch
+  ports:
+    - port: 7700
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: meilisearch
+  namespace: ship-archive
+spec:
+  serviceName: meilisearch
+  replicas: 1
+  selector:
+    matchLabels:
+      app: meilisearch
+  template:
+    metadata:
+      labels:
+        app: meilisearch
+    spec:
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: meilisearch
+          image: getmeili/meilisearch:v1.55.0
+          ports:
+            - name: http
+              containerPort: 7700
+          env:
+            # Production mode refuses to start without a master key and turns the dashboard off.
+            - name: MEILI_ENV
+              value: production
+            - name: MEILI_NO_ANALYTICS
+              value: "true"
+            - name: MEILI_DB_PATH
+              value: /meili_data/data.ms
+            - name: MEILI_DUMP_DIR
+              value: /meili_data/dumps
+            - name: MEILI_SNAPSHOT_DIR
+              value: /meili_data/snapshots
+          envFrom:
+            - secretRef:
+                name: meilisearch-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: data
+              mountPath: /meili_data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
+---
+# Registers the per-service search keys (k8s/meilisearch/keys.json) in Meilisearch.
+# Safe to run again at any time: it only creates what is missing or changed.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: meilisearch-init
+  namespace: ship-archive
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: init
+          image: python:3.12.7-slim-bookworm
+          command: ["python", "/init/init.py"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: MEILI_URL
+              value: http://meilisearch:7700
+            - name: MEILI_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: meilisearch-secrets
+                  key: MEILI_MASTER_KEY
+          volumeMounts:
+            - name: init
+              mountPath: /init
+      volumes:
+        - name: init
+          configMap:
+            name: meilisearch-init

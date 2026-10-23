@@ -11,6 +11,7 @@ from catalog_api.names import router as names_router
 from catalog_api.organisations import router as organisations_router
 from catalog_api.relations import router as relations_router
 from catalog_api.relay import OutboxRelay
+from catalog_api.indexing import router as indexing_router
 from catalog_api.review import router as review_router
 from catalog_api.settings import Settings
 from catalog_api.ships import router as ships_router
@@ -68,4 +69,5 @@ def create_app(settings: Settings) -> FastAPI:
     app.include_router(documents_router)
     app.include_router(transcriptions_router)
     app.include_router(review_router)
+    app.include_router(indexing_router)
     return app

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Two failure scenarios, on the real cluster:
+# Three failure scenarios, on the real cluster:
 #   A. RabbitMQ is restarted while a job is waiting: the queue and the job survive.
 #   B. catalog-api is killed between a write and its publish, with the broker down: no event is lost,
 #      the outbox is relayed by the replacement once the broker is back.
+#   C. Meilisearch's pod is deleted: its indexes and registered keys come back from the volume.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
@@ -56,3 +57,16 @@ until [ "$(unpublished_events)" = 0 ]; do
   sleep 1
 done
 echo "OK: the outbox was relayed after the kill, nothing was lost"
+
+echo "== C. Meilisearch keeps its data when its pod is deleted"
+total() { curl -sfG "$BASE_URL/api/search/documents" --data-urlencode "n=$SECONDS$RANDOM" | jq -r .total; }
+before=$(total)
+[ "$before" -ge 1 ] || fail "nothing is indexed, so there is nothing to lose (run make smoke first)"
+kubectl -n "$NAMESPACE" delete pod meilisearch-0 >/dev/null
+kubectl -n "$NAMESPACE" rollout status statefulset/meilisearch --timeout=180s >/dev/null
+deadline=$((SECONDS + 60))
+until [ "$(total 2>/dev/null || echo -1)" = "$before" ]; do
+  [ "$SECONDS" -lt "$deadline" ] || fail "after the restart search holds $(total 2>/dev/null || echo nothing) documents, expected $before"
+  sleep 1
+done
+echo "OK: $before documents are still searchable after the pod was deleted, with the same keys"

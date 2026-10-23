@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [catalog-api, transcribe-worker]
+        service: [catalog-api, transcribe-worker, indexer, search-api]
     services:
       postgres:
         image: postgres:16-alpine
@@ -31,6 +31,17 @@ jobs:
           --health-cmd "rabbitmq-diagnostics -q ping"
           --health-interval 10s
           --health-timeout 10s
+          --health-retries 10
+      meilisearch:
+        image: getmeili/meilisearch:v1.55.0
+        env:
+          MEILI_MASTER_KEY: test-master-key
+          MEILI_NO_ANALYTICS: "true"
+        ports: ["57700:7700"]
+        options: >-
+          --health-cmd "curl -sf http://localhost:7700/health"
+          --health-interval 5s
+          --health-timeout 5s
           --health-retries 10
     defaults:
       run:
@@ -68,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [catalog-api, transcribe-worker, web-ui]
+        service: [catalog-api, transcribe-worker, indexer, search-api, web-ui]
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
