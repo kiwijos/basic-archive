@@ -5,8 +5,9 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
-stop_file=$(mktemp -u); ids_file=$(mktemp)
-trap 'rm -f "$auth_header" "$stop_file" "$ids_file"' EXIT
+stop_file=$(mktemp -u); ids_file=$(mktemp); probe_out=$(mktemp); probe_pid=""
+# An interrupted run must not leave the probe sending requests for ever.
+trap '[ -z "$probe_pid" ] || kill "$probe_pid" 2>/dev/null; rm -f "$auth_header" "$stop_file" "$ids_file" "$probe_out"' EXIT
 
 image=$(api GET "/documents?source_system=seed" | jq -r '.[0].images[0].id // empty')
 [ -n "$image" ] || image=$(upload_scan "rollout$(date +%s)")
@@ -20,14 +21,15 @@ roll() { # roll DEPLOYMENT: restart it and wait until the new pods are ready
 probe_during_roll() { # probe_during_roll DEPLOYMENT URL RATE [HEADER_FILE]
   local service=$1 url=$2 rate=$3 header=${4:-} result status=0
   rm -f "$stop_file"
-  python3 "$SCRIPTS_DIR/probe.py" "$url" "$rate" "$stop_file" $header > "$ids_file" &
-  local probe=$!
+  python3 "$SCRIPTS_DIR/probe.py" "$url" "$rate" "$stop_file" $header > "$probe_out" &
+  local probe=$!; probe_pid=$probe
   sleep 3
   roll "$service"
   sleep 5 # the last old pod may still be going away
   touch "$stop_file"
   wait "$probe" || status=$?
-  result=$(cat "$ids_file")
+  probe_pid=""
+  result=$(cat "$probe_out")
   printf '  %-18s %s\n' "$service" "$result"
   return $status
 }
@@ -36,7 +38,8 @@ failures=0
 echo "Rolling each service while requests go through the Ingress:"
 probe_during_roll web-ui "$BASE_URL/" 10 || failures=$((failures + 1))
 probe_during_roll catalog-api "$BASE_URL/api/catalog/ships?source_system=seed" 10 "$auth_header" || failures=$((failures + 1))
-# search-api answers 429 above 120 requests a minute from one address and replica, so this stays well below that.
+# search-api answers 429 above 120 requests a minute from one address and replica. Three a second is 180 a minute over
+# at least two replicas, so about 90 each: under the limit, but not by much, so do not raise it.
 probe_during_roll search-api "$BASE_URL/api/search/subjects?q=nordstjarnan" 3 || failures=$((failures + 1))
 probe_during_roll cantaloupe "$BASE_URL/iiif/3/$image/info.json" 10 || failures=$((failures + 1))
 [ "$failures" -eq 0 ] || fail "$failures service(s) dropped requests while being rolled"

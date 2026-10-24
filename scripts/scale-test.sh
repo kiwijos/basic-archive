@@ -13,6 +13,7 @@ restore() {
   while read -r name min max; do
     kubectl -n "$NAMESPACE" patch hpa "$name" --type merge -p "{\"spec\":{\"minReplicas\":$min,\"maxReplicas\":$max}}" >/dev/null 2>&1 || true
   done < "$saved"
+  stop_tile_load
   rm -f "$auth_header" "$mem_file" "$saved"
 }
 trap restore EXIT
@@ -52,6 +53,10 @@ sampler=$!
 echo "--- smoke"; "$SCRIPTS_DIR/smoke.sh" | tail -1 | cut -c1-80
 echo "--- ocr-parallel"; "$SCRIPTS_DIR/ocr-parallel.sh" | tail -1
 echo "--- iiif-limits"; "$SCRIPTS_DIR/iiif-limits.sh" | tail -1
+# The heaviest thing the archive does: 24 clients pulling random tiles out of the largest drawing, spread over all three Cantaloupe replicas.
+echo "--- tiles"; start_tile_load "$(biggest_image)" 75
+sleep 80
+stop_tile_load
 sleep 10
 
 kill "$sampler" 2>/dev/null || true; sampler=""

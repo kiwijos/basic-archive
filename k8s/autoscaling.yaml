@@ -1,6 +1,6 @@
 # Scale on CPU, measured against each Deployment's CPU request (metrics-server, installed by make cluster-tools).
 # The Deployments leave `replicas` to these. web-ui and the indexer are fixed at three: web-ui is nearly idle, and
-# only one indexer replica works at a time (see ADR 0005 and the README scaling section).
+# only one indexer replica works at a time (see ADR 0009).
 ---
 # Staff and public API calls.
 apiVersion: autoscaling/v2

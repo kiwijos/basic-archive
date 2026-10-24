@@ -40,9 +40,18 @@ echo "postgres-0     deleted and back: Ship Pers$run read back by id"
 image=$(upload_scan "pers$run") || fail "upload failed"
 sha=$(api GET "/images/$image" | jq -r .sha256)
 restart_pod garage-0
-curl -sf "$BASE_URL/api/catalog/images/$image/content" -H @"$auth_header" -o "$content" || fail "the scan could not be downloaded after Garage came back"
+# A single instance is unreachable for a moment after it reports ready, until its Service points at it again, and
+# catalog-api answers 502 meanwhile. How long that lasted is part of the record.
+waited_from=$SECONDS; code=000
+while [ "$((SECONDS - waited_from))" -le 30 ]; do
+  code=$(curl -s -o "$content" -w '%{http_code}' "$BASE_URL/api/catalog/images/$image/content" -H @"$auth_header")
+  [ "$code" = 200 ] && break
+  sleep 1
+done
+[ "$code" = 200 ] || fail "the scan could not be downloaded within 30 s of Garage coming back: HTTP $code $(head -c 200 "$content")"
+unavailable=$((SECONDS - waited_from))
 [ "$(shasum -a 256 "$content" | cut -d' ' -f1)" = "$sha" ] || fail "the scan changed while Garage was restarted"
-echo "garage-0       deleted and back: scan $image downloaded, SHA-256 unchanged"
+echo "garage-0       deleted and back: scan $image downloaded, SHA-256 unchanged (unreachable for ${unavailable} s after ready)"
 
 # Meilisearch: the index answers again without a reindex.
 search_finds /subjects "$ship" 60 --data-urlencode "q=Pers$run" || fail "the Ship was not in the search index before the test"

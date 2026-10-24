@@ -50,12 +50,12 @@ spec:
               value: garage
             - name: MASTERS_BUCKET
               value: masters
-          # Ready only once the migration Job has brought the schema to the latest revision.
           # Kept running a few seconds after the Ingress is told to stop sending, so a request already on its way is answered.
           lifecycle:
             preStop:
               sleep:
                 seconds: 5
+          # Ready only once the migration Job has brought the schema to the latest revision.
           readinessProbe:
             httpGet:
               path: /readyz
