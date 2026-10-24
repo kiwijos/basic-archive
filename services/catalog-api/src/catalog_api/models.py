@@ -17,6 +17,8 @@ class Subject(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     kind: Mapped[str] = mapped_column(Text)
+    # Facts from other sources, each with where it came from, its identifier and when it was fetched.
+    external_refs: Mapped[list] = mapped_column(JSONB, server_default="[]")
     created_by: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     deleted_at: Mapped[datetime | None]

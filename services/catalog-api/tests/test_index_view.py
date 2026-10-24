@@ -379,3 +379,24 @@ def test_building_a_ships_view_does_not_cost_more_for_each_relation_it_has(clien
         client.post(f"{API}/relations", json={"from_subject_id": other, "predicate": "rebuilt_from", "to_subject_id": yard["ship"]}, headers=staff)
 
     assert count_queries(client, f"/index/ship/{yard['ship']}") == before
+
+
+def test_a_ships_view_carries_its_chosen_wikidata_matches_and_follows_the_contract(client, staff, yard, wikidata, outbox):
+    from catalog_api.contracts import validate
+
+    wikidata.add("Q219821", en=("Vasa", "17th century Swedish warship"))
+    assert subject_view(client, "ship", yard["ship"]).json()["external_refs"] == []
+
+    assert client.put(f"{API}/ships/{yard['ship']}/wikidata/Q219821", headers=staff).status_code == 200
+    view = subject_view(client, "ship", yard["ship"]).json()
+
+    [reference] = view["external_refs"]
+    assert (reference["source"], reference["id"], reference["label"]) == ("wikidata", "Q219821", "Vasa")
+    assert reference["url"] == "https://www.wikidata.org/wiki/Q219821"
+    assert reference["retrieved_at"]
+    assert "chosen_by" not in reference  # who chose is for staff, not for the index
+    validate("index.view", view)
+    assert subject_view(client, "organisation", yard["organisation"]).json()["external_refs"] == []
+
+    client.delete(f"{API}/ships/{yard['ship']}/wikidata/Q219821", headers=staff)
+    assert subject_view(client, "ship", yard["ship"]).json()["external_refs"] == []

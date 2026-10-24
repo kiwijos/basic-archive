@@ -35,6 +35,7 @@ class ShipOut(ShipFacts):
     id: uuid.UUID
     name: str | None
     created_by: str
+    external_refs: list[dict]
 
 
 def ship_out(session: Session, subject: Subject, ship: Ship) -> ShipOut:
@@ -42,6 +43,7 @@ def ship_out(session: Session, subject: Subject, ship: Ship) -> ShipOut:
         id=subject.id,
         name=current_name(session, subject.id),
         created_by=subject.created_by,
+        external_refs=subject.external_refs,
         ship_type=ship.ship_type,
         tonnage=ship.tonnage,
         launched=present(ship.launched),
@@ -50,12 +52,17 @@ def ship_out(session: Session, subject: Subject, ship: Ship) -> ShipOut:
     )
 
 
-def find_ship(session: Session, ship_id: uuid.UUID) -> tuple[Subject, Ship]:
-    row = session.execute(
+def find_ship(session: Session, ship_id: uuid.UUID, *, lock: bool = False) -> tuple[Subject, Ship]:
+    """The Ship, or a 404. With `lock` its Subject row is locked until the transaction ends, so a change that
+    reads a value and writes it back is not overwritten by another doing the same."""
+    query = (
         select(Subject, Ship)
         .join(Ship, Ship.subject_id == Subject.id)
         .where(Subject.id == ship_id, Subject.deleted_at.is_(None))
-    ).one_or_none()
+    )
+    if lock:
+        query = query.with_for_update(of=Subject)
+    row = session.execute(query).one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Ship not found")
     return row

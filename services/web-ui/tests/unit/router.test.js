@@ -22,6 +22,9 @@ test("every Ship, Organisation and Document has a permanent address of its own",
   assert.deepEqual(parseRoute(`/documents/${ID}`), { name: "document", params: { id: ID } });
   assert.deepEqual(parseRoute(`/documents/${ID}/`), { name: "document", params: { id: ID } });
   assert.deepEqual(parseRoute(`/ships/${ID}?q=vega#names`), { name: "ship", params: { id: ID } });
+  assert.deepEqual(parseRoute(`/ships/${ID}/edit`), { name: "shipEdit", params: { id: ID } });
+  assert.deepEqual(parseRoute(`/ships/${ID}/edit/`), { name: "shipEdit", params: { id: ID } });
+  assert.equal(pathFor("shipEdit", { id: ID }), `/ships/${ID}/edit`);
 });
 
 test("the public search page keeps its query in the address without changing which page it is", () => {
@@ -47,7 +50,7 @@ test("paths are built from the same names the router understands", () => {
   assert.equal(pathFor("ship", { id: ID }), `/ships/${ID}`);
   assert.equal(pathFor("organisation", { id: ID }), `/organisations/${ID}`);
   assert.equal(pathFor("document", { id: ID }), `/documents/${ID}`);
-  for (const [name, params] of [["search", {}], ["queue", {}], ["upload", {}], ["review", { documentId: ID }], ["ship", { id: ID }], ["organisation", { id: ID }], ["document", { id: ID }]]) {
+  for (const [name, params] of [["search", {}], ["queue", {}], ["upload", {}], ["review", { documentId: ID }], ["ship", { id: ID }], ["shipEdit", { id: ID }], ["organisation", { id: ID }], ["document", { id: ID }]]) {
     assert.deepEqual(parseRoute(pathFor(name, params)), { name, params });
   }
 });

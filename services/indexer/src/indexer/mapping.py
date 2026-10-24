@@ -24,6 +24,7 @@ def to_document(view: dict) -> dict:
         "launched": view["launched"],
         "fate": view["fate"],
         "fate_date": view["fate_date"],
+        "external_refs": view["external_refs"],
         "relations": view["relations"],
         "documents": view["documents"],
     }

@@ -14,12 +14,12 @@ dependencies = [
     "python-multipart==0.0.32",
     "jsonschema==4.26.0",
     "pika==1.4.4",
+    "httpx==0.28.1",
 ]
 
 [dependency-groups]
 dev = [
     "pytest==8.3.4",
-    "httpx==0.28.1",
     "moto[server]==5.2.4",
 ]
 

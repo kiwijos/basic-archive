@@ -26,7 +26,7 @@ export function describeFailure(status, body) {
  * and every call carries the staff token.
  */
 export function createApi({ fetch, getToken, onUnauthorized, base = "" }) {
-  async function request(path, { method, json, body, as = "json", signOutOn401 = true } = {}) {
+  async function request(path, { method, json, body, as = "json", signOutOn401 = true, saysItself = false } = {}) {
     const headers = { Authorization: `Bearer ${getToken()}` };
     let payload = body;
     if (json !== undefined) {
@@ -41,10 +41,13 @@ export function createApi({ fetch, getToken, onUnauthorized, base = "" }) {
     }
     if (!response.ok) {
       const parsed = await response.json().catch(() => undefined);
-      const message = describeFailure(response.status, parsed);
+      // Some answers are written for the person already (Wikidata being slow is not a problem with files).
+      const said = saysItself && parsed && typeof parsed.detail === "string" ? parsed.detail : null;
+      const message = said ?? describeFailure(response.status, parsed);
       if (response.status === 401 && signOutOn401) onUnauthorized(message);
       throw new ApiError(response.status, message);
     }
+    if (response.status === 204) return null;
     return as === "blob" ? response.blob() : response.json();
   }
 
@@ -54,6 +57,11 @@ export function createApi({ fetch, getToken, onUnauthorized, base = "" }) {
     me: () => request(`${catalog}/me`, { signOutOn401: false }),
     reviewQueue: ({ limit = 50, offset = 0 } = {}) => request(`${catalog}/review-queue?limit=${limit}&offset=${offset}`),
     document: (id) => request(`${catalog}/documents/${id}`),
+    ship: (id) => request(`${catalog}/ships/${id}`),
+    wikidataCandidates: (id, query) =>
+      request(`${catalog}/ships/${id}/wikidata-candidates?${new URLSearchParams({ q: query })}`, { saysItself: true }),
+    chooseWikidata: (id, qid) => request(`${catalog}/ships/${id}/wikidata/${qid}`, { method: "PUT", saysItself: true }),
+    removeWikidata: (id, qid) => request(`${catalog}/ships/${id}/wikidata/${qid}`, { method: "DELETE" }),
     transcriptions: (imageId) => request(`${catalog}/images/${imageId}/transcriptions`),
     imageContent: (imageId) => request(`${catalog}/images/${imageId}/content`, { as: "blob" }),
     uploadDocument: (form) => request(`${catalog}/documents`, { method: "POST", body: form }),

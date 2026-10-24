@@ -151,3 +151,31 @@ test("an image's bytes come back as a blob the page can show", async () => {
   assert.equal(blob.type, "image/png");
   assert.equal(blob.size, 4);
 });
+
+test("when Wikidata is slow or down the message is the one catalog-api wrote, not a claim about the file store", async () => {
+  for (const status of [502, 504]) {
+    const api = clientFor(fakeNetwork(json(status, { detail: "Wikidata did not answer in time. Try again in a moment." }))).api;
+
+    await assert.rejects(api.wikidataCandidates(ID, "Vasa"), (error) => error.status === status && error.message === "Wikidata did not answer in time. Try again in a moment.");
+  }
+  const files = clientFor(fakeNetwork(json(502, { detail: "Object storage is unavailable" }))).api;
+  await assert.rejects(files.imageContent(ID), /file store is not available/i);
+});
+
+test("the Wikidata calls go to the Ship's own addresses with the staff token, and only choosing and removing change anything", async () => {
+  const net = fakeNetwork(json(200, { candidates: [] }), json(200, { id: "Q1" }), new Response(null, { status: 204 }), json(200, { id: ID, external_refs: [] }));
+  const { api } = clientFor(net);
+
+  await api.wikidataCandidates(ID, "Nord & Söner");
+  await api.chooseWikidata(ID, "Q219821");
+  await api.removeWikidata(ID, "Q219821");
+  await api.ship(ID);
+
+  assert.deepEqual(net.calls.map((c) => [c.options.method ?? "GET", c.url]), [
+    ["GET", `/api/catalog/ships/${ID}/wikidata-candidates?q=Nord+%26+S%C3%B6ner`],
+    ["PUT", `/api/catalog/ships/${ID}/wikidata/Q219821`],
+    ["DELETE", `/api/catalog/ships/${ID}/wikidata/Q219821`],
+    ["GET", `/api/catalog/ships/${ID}`],
+  ]);
+  assert.ok(net.calls.every((c) => c.options.headers.Authorization === "Bearer secret-token"));
+});

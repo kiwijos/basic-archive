@@ -203,6 +203,14 @@ def linked_documents(session: Session, subject_id: uuid.UUID) -> list[dict]:
     ]
 
 
+def public_references(subject: Subject) -> list[dict]:
+    """The outside facts a Subject carries, as the public may see them: where from, which item, when fetched."""
+    return [
+        {key: ref.get(key) for key in ("source", "id", "label", "description", "url", "retrieved_at")}
+        for ref in subject.external_refs
+    ]
+
+
 def subject_view(session: Session, kind: Literal["ship", "organisation"], subject_id: uuid.UUID) -> dict:
     if kind == "ship":
         subject, ship = find_ship(session, subject_id)
@@ -247,6 +255,7 @@ def subject_view(session: Session, kind: Literal["ship", "organisation"], subjec
             for name in names_of(session, subject.id)
         ],
         **facts,
+        "external_refs": public_references(subject),
         "relations": relations_of(session, subject.id),
         "documents": linked_documents(session, subject.id),
     }
