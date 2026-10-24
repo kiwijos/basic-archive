@@ -38,7 +38,9 @@ spec:
           # The archive's exchanges and queues are imported once the broker is up. Importing is
           # additive and safe to repeat, so it runs on every start. The hook runs as root, so it
           # waits for the server to create its own Erlang cookie first: a root-owned cookie
-          # would stop the server (which runs as the rabbitmq user) from reading it.
+          # would stop the server (which runs as the rabbitmq user) from reading it. A broker from before
+          # slice 12 holds record.changed without single-active-consumer, which a queue cannot be changed to:
+          # it is deleted once so the import re-creates it, and make reindex repairs whatever it held.
           lifecycle:
             postStart:
               exec:
@@ -54,6 +56,9 @@ spec:
                     until rabbitmq-diagnostics -q check_running >/dev/null 2>&1; do
                       tries=$((tries + 1)); [ "$tries" -le 90 ] || exit 1; sleep 2;
                     done;
+                    if rabbitmqctl -q list_queues name arguments | grep '^record.changed[[:space:]]' | grep -qv single-active-consumer; then
+                      rabbitmqctl delete_queue record.changed;
+                    fi;
                     rabbitmqctl import_definitions /etc/rabbitmq/definitions.json
           # Ready means running and holding the archive's queues, not merely running. list_queues fails
           # when the node is down, so one command covers both and starts only one Erlang VM.

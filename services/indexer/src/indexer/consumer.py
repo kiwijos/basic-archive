@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import socket
 
 import aio_pika
 from aio_pika.abc import AbstractIncomingMessage
@@ -61,7 +62,8 @@ class Consumer:
             channel = await connection.channel()
             await channel.set_qos(prefetch_count=1)
             queue = await channel.get_queue(self._settings.queue, ensure=False)
-            consumer = await queue.consume(self._handle)
+            # Named after the pod, so `rabbitmqctl list_consumers` shows which replica is the active one.
+            consumer = await queue.consume(self._handle, consumer_tag=socket.gethostname())
             self._status.connected = True
             logger.info("Waiting for changes on %s", self._settings.queue)
             waiting = [asyncio.create_task(stop.wait()), asyncio.create_task(lost.wait())]

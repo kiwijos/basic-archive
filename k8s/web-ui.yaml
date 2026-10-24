@@ -16,7 +16,12 @@ metadata:
   name: web-ui
   namespace: ship-archive
 spec:
-  replicas: 1
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: web-ui
@@ -31,6 +36,11 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          # Kept running a few seconds after the Ingress is told to stop sending, so a request already on its way is answered.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
           readinessProbe:
             httpGet:
               path: /healthz

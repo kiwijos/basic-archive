@@ -363,8 +363,14 @@ search_for /subjects "any(.hits[]; .id == \"$doomed\") | not" 30 --data-urlencod
 # Page size is capped and repeated queries are served from the cache.
 [ "$(curl -sfG "$BASE_URL/api/search/documents" --data-urlencode page_size=5000 | jq '.page_size')" = 50 ] || fail "the page size was not capped at 50"
 cache_probe="cache-$run"
-first_cache=$(curl -sG -D - -o /dev/null "$BASE_URL/api/search/documents" --data-urlencode "q=$cache_probe" | tr -d '\r' | awk -F': ' 'tolower($1) == "x-cache" {print $2}')
-second_cache=$(curl -sG -D - -o /dev/null "$BASE_URL/api/search/documents" --data-urlencode "q=$cache_probe" | tr -d '\r' | awk -F': ' 'tolower($1) == "x-cache" {print $2}')
+# Each search-api replica has its own cache, so the same query is a MISS until a replica sees it twice: ask repeatedly.
+cache_of() { curl -sG -D - -o /dev/null "$BASE_URL/api/search/documents" --data-urlencode "q=$cache_probe" | tr -d '\r' | awk -F': ' 'tolower($1) == "x-cache" {print $2}'; }
+first_cache=$(cache_of)
+second_cache=MISS
+for _ in $(seq 1 20); do
+  second_cache=$(cache_of)
+  [ "$second_cache" = HIT ] && break
+done
 [ "$first_cache,$second_cache" = "MISS,HIT" ] || fail "repeated queries were not cached: $first_cache,$second_cache"
 
 echo "SMOKE OK: ship $id created and read back as $staff_name; renames, sale, rebuild, validation and delete verified; Image uploaded to Garage, duplicate flagged, link read back, download address works and expires, key rights verified; page read automatically at $accuracy accuracy, corrupt image failed into the dead-letter queue, re-read works; page added, scan served, correction verified and kept beside the readings, review queue counts right, web UI served with deep links; search finds the corrected document verified, the unverified one only by default, a ship by its old name, builder and year from Relations, deletes leave the index, page size capped, cache hits; open landing records for a Document and for two Ships, with rights, verified state, names, relations and a rebuilt-from link, and their addresses reload; $wikidata_checked; IIIF information, a tile and the links in search results work through the Ingress and Garage is not exposed"
