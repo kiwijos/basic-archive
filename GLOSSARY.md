@@ -73,3 +73,7 @@ _Avoid_: Fuzzy date, approximate date
 **External reference**:
 A fact about a Subject taken from another source, kept with where it came from, its identifier there and when it was fetched. For now the only source is Wikidata, and a person always chooses the match; nothing is matched automatically.
 _Avoid_: Link, enrichment, linked data
+
+**Source key**:
+The pair of a source system (such as `seed` or `wikimedia-commons`) and an identifier in it, which a Document, Ship or Organisation may carry to say where it came from. It is unique, cannot be changed, and stays reserved after the record is deleted, which is how loading the demo data twice finds the first copy instead of making a second.
+_Avoid_: External id, import id

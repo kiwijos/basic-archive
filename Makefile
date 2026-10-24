@@ -1,4 +1,4 @@
-.PHONY: cluster-tools secrets deploy smoke e2e reindex iiif-limits ocr-parallel resilience test test-db
+.PHONY: cluster-tools secrets deploy demo seed demo-check reset smoke e2e reindex iiif-limits ocr-parallel resilience test test-db
 
 # One-time cluster prerequisites: Traefik and metrics-server (needs helm).
 cluster-tools:
@@ -23,6 +23,24 @@ deploy: secrets
 	kubectl -n ship-archive rollout status deployment/search-api --timeout=180s
 	kubectl -n ship-archive rollout status deployment/cantaloupe --timeout=240s
 	kubectl -n ship-archive rollout status deployment/web-ui --timeout=180s
+
+# From an empty cluster to a working demo: deploy, wait until everything is ready, load the demo data, and check it.
+# Safe to run again. Needs the cluster tooling (make cluster-tools) and network access for the Wikimedia plates:
+# without it they are skipped, loudly, and the rest still works. The smoke test is a separate acceptance check
+# (make smoke) because it leaves throwaway Documents behind that a demo should not have.
+demo: deploy seed demo-check
+
+# Loads the demo data (see seed/SOURCES.md) through the public API. Idempotent.
+seed:
+	./scripts/seed.sh seed
+
+# Read-only: is what the demo shows there, and can it be found, opened and zoomed into?
+demo-check:
+	./scripts/seed.sh check
+
+# Deletes the ship-archive namespace and everything in it, after asking. Then `make demo` starts from nothing.
+reset:
+	./scripts/reset.sh
 
 smoke:
 	./scripts/smoke.sh
@@ -65,4 +83,5 @@ test:
 	cd services/transcribe-worker && uv run pytest -q
 	cd services/indexer && uv run pytest -q
 	cd services/search-api && uv run pytest -q
+	cd seed && uv run pytest -q
 	cd services/web-ui && npm test
