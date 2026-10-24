@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 PLAIN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$"
 Plain = Annotated[str, StringConstraints(pattern=PLAIN)]
-LIMIT = 200  # most records one lookup returns
+LIMIT = 200
 
 
 class SourceKeyIn(BaseModel):

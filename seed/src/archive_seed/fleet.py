@@ -1,7 +1,7 @@
 """A fictional fleet: invented firms and ships with a life, for the demo.
 
 Nothing here is real. The firms, the ships and what happened to them were made up for this archive, and
-every record says so. The story: a barque is built in 1889, sold in 1903, renamed twice, and in 1933 its
+every name and relation says so. The story: a barque is built in 1889, sold in 1903, renamed twice, and in 1933 its
 hull is rebuilt into a motor vessel, which is a new Ship linked back to the old one.
 """
 

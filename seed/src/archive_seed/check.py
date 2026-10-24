@@ -12,7 +12,7 @@ import httpx
 
 from archive_seed.documents import DOCUMENTS
 from archive_seed.fleet import ORGANISATIONS, SHIPS, SOURCE_SYSTEM
-from archive_seed.loader import API, PageResult, Seeder
+from archive_seed.loader import API, PageResult, SeedError, Seeder
 from archive_seed.plates import PLATE_DOCUMENTS
 from archive_seed.plates import SOURCE_SYSTEM as PLATE_SYSTEM
 
@@ -28,6 +28,10 @@ class Finding:
 
     def __str__(self) -> str:
         return f"  {self.outcome:<4} {self.name}" + (f": {self.detail}" if self.detail else "")
+
+
+class Unreadable(Exception):
+    """The archive refused or failed a question the check needs answered."""
 
 
 class Check:
@@ -48,8 +52,10 @@ class Check:
         return client.get(path, params=params)
 
     def _list(self, kind: str, system: str) -> dict[str, dict]:
-        found = self._get(self.staff, f"{API}/{kind}", source_system=system).json()
-        return {item["source_id"]: item for item in found}
+        response = self._get(self.staff, f"{API}/{kind}", source_system=system)
+        if response.status_code != 200:
+            raise Unreadable(f"listing {kind} answered {response.status_code}: {response.text[:200]}")
+        return {item["source_id"]: item for item in response.json()}
 
     def _eventually(self, test) -> str | None:
         """None as soon as `test` is satisfied; otherwise what it last complained about, once the wait is over."""
@@ -61,8 +67,12 @@ class Check:
             time.sleep(1)
 
     def run(self) -> list[Finding]:
-        ships, firms, documents = self._list("ships", SOURCE_SYSTEM), self._list("organisations", SOURCE_SYSTEM), self._list("documents", SOURCE_SYSTEM)
-        plates = self._list("documents", PLATE_SYSTEM)
+        try:
+            ships, firms = self._list("ships", SOURCE_SYSTEM), self._list("organisations", SOURCE_SYSTEM)
+            documents, plates = self._list("documents", SOURCE_SYSTEM), self._list("documents", PLATE_SYSTEM)
+        except (Unreadable, httpx.HTTPError) as error:
+            self._add("the archive can be read", False, str(error))
+            return self.findings
         self._records(ships, firms, documents)
         self._states(documents)
         self._history(ships)
@@ -150,9 +160,9 @@ class Check:
     def _accuracy(self) -> None:
         try:
             pages = Seeder(self.staff).measure_pages()
-        except Exception as error:  # noqa: BLE001 - reported, not raised: the other checks still count
+        except (SeedError, httpx.HTTPError) as error:  # reported, not raised: the other checks still count
             self._add("the OCR accuracy can be measured", False, str(error))
             return
         measured = [p for p in pages if p.accuracy is not None]
-        self._add("the OCR accuracy is measured", bool(measured), f"{len(measured)} of {len(pages)} pages")
+        self._add("the OCR accuracy is measured on every page", len(measured) == len(pages) > 0, f"{len(measured)} of {len(pages)} pages")
         self.pages = pages

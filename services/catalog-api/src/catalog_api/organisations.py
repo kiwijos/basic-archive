@@ -65,10 +65,10 @@ def create_organisation(
     author: str = Depends(staff_name),
     session: Session = Depends(get_session),
 ) -> OrganisationOut:
-    refuse_if_taken(session, Subject, new.source_system, new.source_id, "A record")
+    refuse_if_taken(session, Subject, new.source_system, new.source_id, "A Ship or Organisation")
     subject = Subject(kind="organisation", created_by=author, source_system=new.source_system, source_id=new.source_id)
     session.add(subject)
-    flush_or_conflict(session, new.source_system, new.source_id, "A record")
+    flush_or_conflict(session, new.source_system, new.source_id, "A Ship or Organisation")
     organisation = Organisation(
         subject_id=subject.id, organisation_type=new.organisation_type, place=new.place
     )

@@ -87,10 +87,10 @@ def create_ship(
     author: str = Depends(staff_name),
     session: Session = Depends(get_session),
 ) -> ShipOut:
-    refuse_if_taken(session, Subject, new.source_system, new.source_id, "A record")
+    refuse_if_taken(session, Subject, new.source_system, new.source_id, "A Ship or Organisation")
     subject = Subject(kind="ship", created_by=author, source_system=new.source_system, source_id=new.source_id)
     session.add(subject)
-    flush_or_conflict(session, new.source_system, new.source_id, "A record")
+    flush_or_conflict(session, new.source_system, new.source_id, "A Ship or Organisation")
     ship = Ship(subject_id=subject.id)
     apply_facts(ship, new)
     session.add(ship)
