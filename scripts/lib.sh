@@ -49,3 +49,38 @@ queue_messages() { # queue_messages QUEUE: how many messages are waiting in a Ra
 unpublished_events() { # events still waiting in the outbox
   kubectl -n "$NAMESPACE" exec postgres-0 -- psql -U postgres -d archive -tAc "SELECT count(*) FROM outbox WHERE published_at IS NULL"
 }
+
+biggest_image() { # biggest_image: an Image to ask the image server about: a seeded drawing, else a seeded page, else a new upload
+  local image
+  image=$(api GET "/documents?source_system=wikimedia-commons" | jq -r '.[0].images[0].id // empty')
+  [ -n "$image" ] || image=$(api GET "/documents?source_system=seed" | jq -r '.[0].images[0].id // empty')
+  [ -n "$image" ] || image=$(upload_scan "load$(date +%s)")
+  echo "$image"
+}
+
+start_tile_load() { # start_tile_load IMAGE_ID SECONDS: 24 clients inside the cluster ask Cantaloupe for random tiles
+  # From inside the cluster, past the Ingress rate limit that exists to stop exactly this.
+  local image=$1 seconds=$2 width tag
+  width=$(curl -sf "$BASE_URL/iiif/3/$image/info.json" | jq -r .width)
+  tag=$(kubectl -n "$NAMESPACE" get deploy search-api -o jsonpath='{.spec.template.spec.containers[0].image}' | cut -d: -f2)
+  kubectl -n "$NAMESPACE" delete pod tile-load --ignore-not-found --wait=true >/dev/null
+  kubectl -n "$NAMESPACE" run tile-load --restart=Never --image="kiwijos/ship-archive-search-api:$tag" --image-pull-policy=IfNotPresent \
+    --env="IMAGE=$image" --env="WIDTH=$width" --env="SECONDS_TO_RUN=$seconds" --command -- python -c '
+import os, random, threading, time, urllib.request
+image, width, until = os.environ["IMAGE"], int(os.environ["WIDTH"]), time.time() + int(os.environ["SECONDS_TO_RUN"])
+def fetch():
+    while time.time() < until:
+        size = random.choice((1024, 2048, 3072))
+        x, y = random.randrange(0, max(1, width - size)), random.randrange(0, max(1, width // 2 - size))
+        try:
+            urllib.request.urlopen(f"http://cantaloupe:8182/iiif/3/{image}/{x},{y},{size},{size}/!512,/0/default.jpg", timeout=30).read()
+        except Exception:
+            time.sleep(0.2)
+threads = [threading.Thread(target=fetch) for _ in range(24)]
+[t.start() for t in threads]
+[t.join() for t in threads]
+' >/dev/null
+  echo "tile load: random tiles of $image (${width} px wide), 24 clients, ${seconds} s"
+}
+
+stop_tile_load() { kubectl -n "$NAMESPACE" delete pod tile-load --ignore-not-found --wait=false >/dev/null 2>&1 || true; }

@@ -80,3 +80,21 @@ def test_an_instance_without_the_relay_publishes_nothing(new_client, staff, brok
 
     assert receive(broker, "record.changed", expected=0, timeout=0.2) == []
     assert unpublished(database) == 2
+
+
+def test_an_idle_relay_keeps_its_connection_alive_so_the_next_event_does_not_pay_for_a_reconnect(
+    new_client, staff, broker, caplog
+):
+    from conftest import RABBITMQ_URL
+
+    # The broker closes a connection that misses its heartbeats, here after about four seconds of silence.
+    client = new_client(**FAST, rabbitmq_url=f"{RABBITMQ_URL}?heartbeat=2")
+    time.sleep(7)
+
+    started = time.monotonic()
+    ship = client.post(f"{API}/ships", json={"name": "Vega"}, headers=staff).json()["id"]
+
+    [(message, _)] = receive(broker, "record.changed", expected=1, timeout=1.5)
+    assert message["id"] == ship
+    assert time.monotonic() - started < 1.5
+    assert "could not publish" not in caplog.text

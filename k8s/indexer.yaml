@@ -4,8 +4,13 @@ metadata:
   name: indexer
   namespace: ship-archive
 spec:
-  # One consumer keeps changes in order and lets a reindex pause them; it is stateless, so a restart loses nothing.
-  replicas: 1
+  # Three replicas, one working: the record.changed queue lets a single consumer be active, so changes stay in order, and the others take over at once if it dies.
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: indexer

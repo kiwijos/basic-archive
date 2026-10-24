@@ -20,6 +20,10 @@ make resilience      # restarts RabbitMQ, kills catalog-api, deletes Meilisearch
 make e2e             # drives the web UI in a real browser: the staff review flow, and public search and landing pages
 make reindex         # rebuilds the whole search index from the catalog and waits for it
 make iiif-limits     # hammers image tiles through the Ingress: cache headers, 429 when excessive, recovery
+make scale-test      # every service at three replicas under real traffic: no restarts, peak memory printed
+make rollout-test    # rolls every service while requests go through the Ingress: none may fail, no work lost
+make persistence-test  # deletes the Postgres, Garage, Meilisearch and RabbitMQ pods: no data lost
+make hpa-test        # loads the archive until an autoscaler adds replicas, then waits for it to settle back
 make seed            # load the demo data only (safe to run again); make demo-check reads it back
 make reset           # deletes the ship-archive namespace and ALL its data, after you type its name
 ```
@@ -65,7 +69,40 @@ GET /api/search/facets?scope=documents|subjects&...
 
 Unverified (machine-only) text is searched by default and every Document hit carries `verified`; `verified_only=true` keeps only Documents whose every page has been corrected. A Ship is found by any name it has carried and the hit says which name matched. Highlights come back as `{text, match}` parts, never as markup. Page size is capped at 50, identical queries are cached for 5 seconds (at most 32 MB), and each client address is limited to 120 requests a minute per pod (`429` with `Retry-After`; at most 10,000 addresses are tracked). Results include `facets` and, for years, `facet_stats` with the earliest and latest year on offer. Hits link to IIIF image addresses under `/iiif/3`, which Cantaloupe will serve. `GET /api/search/documents/{id}` and `GET /api/search/subjects/{id}` return a record's whole landing page (a Document's text and Rights per page, a Ship's names, relations and Documents); the indexer stores these fields in the index too, so after upgrading from an earlier version run `make reindex` once.
 
-`make reindex` rebuilds both indexes from catalog-api (the token that protects `/reindex` stays inside the indexer pod; the endpoint is not exposed by the Ingress). It also re-creates the indexes and their settings if Meilisearch lost them, and removes anything the catalog no longer has. Run it after losing the Meilisearch volume, or to repair events that were dead-lettered. The indexer is a single replica and a reindex holds back new events until it finishes. Index settings live in `contracts/search-index.settings.json` and are applied by the indexer at startup. See [ADR 0005](docs/adr/0005-derived-search-index-and-per-service-keys.md) for the keys: each service gets its own Meilisearch key, derived from the master key.
+`make reindex` rebuilds both indexes from catalog-api (the token that protects `/reindex` stays inside the indexer pod; the endpoint is not exposed by the Ingress). It also re-creates the indexes and their settings if Meilisearch lost them, and removes anything the catalog no longer has. Run it after losing the Meilisearch volume, or to repair events that were dead-lettered. Three indexer replicas run but only one applies changes (see Scaling), and `make reindex` goes to that one; it holds back new events until it finishes. Index settings live in `contracts/search-index.settings.json` and are applied by the indexer at startup. See [ADR 0005](docs/adr/0005-derived-search-index-and-per-service-keys.md) for the keys: each service gets its own Meilisearch key, derived from the master key.
+
+## Scaling and persistence
+
+| Service | Replicas | How |
+|---|---|---|
+| catalog-api | 2 to 4 | HorizontalPodAutoscaler on CPU (70% of the request) |
+| search-api | 2 to 4 | HPA. Its answer cache and its per-address rate limit are per replica |
+| transcribe-worker | 1 to 4 | HPA. Each replica takes one OCR job at a time from the queue |
+| Cantaloupe | 1 to 3 | HPA. Each replica uses up to 1.5 GiB while decoding large drawings, so the ceiling is low |
+| web-ui | 3 | fixed: nearly idle, nothing to scale on |
+| indexer | 3 | fixed, **one working and two on standby**: the `record.changed` queue allows one active consumer, so changes are applied in order and a replica that dies hands over at once |
+| Postgres, Garage, Meilisearch, RabbitMQ | 1 | StatefulSets on volumes; see below |
+
+Every Deployment has CPU and memory requests, a memory limit, readiness and liveness probes, and a rolling update with `maxUnavailable: 0` and `maxSurge: 1`: a new pod must be ready before an old one goes. The pods behind the Ingress also wait five seconds in a `preStop` hook, so a request already on its way to a pod that is leaving is answered. `make rollout-test` rolls each service while requests go through the Ingress, and none may fail (it caught 72 failures out of 144 when web-ui was switched to `Recreate`, which is how it was checked). Nothing is scaled by hand: `replicas` is left out of the manifests of the four autoscaled Deployments so `make deploy` does not undo the autoscalers.
+
+**Persistence.** Postgres (2 Gi), Garage (the scans, 5 Gi), Meilisearch (the index) and RabbitMQ (queues and messages) each keep their data on a PersistentVolumeClaim from their StatefulSet. `make persistence-test` deletes each pod in turn and checks through the API that nothing is missing: a Ship by id, a stored scan byte for byte, a search that still finds a Ship with no reindex, and an OCR job that waited in the queue through the broker's restart and was read afterwards. The same volume must come back each time (the test compares the claim's UID). Recorded run, 2026-10-24, all four passing:
+
+| Pod deleted | Checked afterwards | Result |
+|---|---|---|
+| postgres-0 | a Ship created before is read back by id | kept |
+| garage-0 | a stored scan downloaded, SHA-256 compared with the one recorded at upload | identical; the API answered 502 for 2 s after the pod reported ready |
+| meilisearch-0 | the Ship is still found by search, with no reindex | kept |
+| rabbitmq-0 | an OCR job waiting for a reader (workers scaled to 0), then read once a worker returned | 2 jobs queued before, 2 after, then read |
+
+A single instance is unreachable for a moment after its pod is replaced (the Service needs a second or two to point at it again), which is why the download is retried for up to 30 s and the wait is part of the record. That blip is the cost of running these four as single instances, below.
+
+**Why these four run as single instances, and the way out.** Each is a stateful system whose replication needs its own design, not a higher replica count; on one laptop node a second copy would add memory and no resilience. A pod that dies is replaced in seconds from its volume, and the services that use it reconnect (`make resilience` covers RabbitMQ and Meilisearch). Production paths: **Postgres** with streaming replication and automatic failover (an operator such as CloudNativePG, or a managed service) plus a connection pooler; **Meilisearch** is a single node by design, so for more capacity or availability shard or replicate with OpenSearch (the index is derived from the catalog and rebuilt by `make reindex`, so moving it is safe); **Garage** as a multi-node cluster with the replication factor raised from 1 to 3 across failure zones, or Ceph (RGW) for the same S3 API at larger scale; **RabbitMQ** as a cluster of three with quorum queues (the queues here are classic, which is fine on one node). Moving any of them is a connection-string change, since the services speak only the standard protocols: SQL, S3, AMQP and the Meilisearch API.
+
+**Memory.** Docker Desktop is given 16 GiB (15 970 MiB visible to the node). `make scale-test` runs every service at three replicas under the smoke test, ten scans read in parallel, a tile hammering through the Ingress and 75 seconds of 24 clients pulling random tiles out of a 58-megapixel plate from inside the cluster. The archive's pods peaked at 1 951 MiB of working set (sampled every 5 s) and the whole node, Kubernetes and Traefik included, at 4 210 MiB (26%); a run before the last change measured 1 970 and 4 084 MiB. So the demonstrated peak leaves most of the allocation free.
+
+That is a measured peak, not a proof of the worst case, and it should not be read as one. Under this load a Cantaloupe pod stayed at about 240 MiB, though a single pod was seen at 1.1 to 1.2 GiB earlier, after it first decoded the large plates, so the figure depends on what has been served. The ceiling if every pod reached its limit at the autoscalers' maximum is 14.4 GiB (catalog-api 4 x 256 MiB, search-api 4 x 256, worker 4 x 1 GiB, Cantaloupe 3 x 1.5 GiB, web-ui 3 x 128, indexer 3 x 256, the four stateful pods 2.8 GiB), and with the roughly 2 GiB the node itself uses that would not fit in 16 GiB. Reaching it needs every service at its maximum and its limit at once, which no load here came near, but it is why the maxima are low and every container has a memory limit: a runaway pod is killed and restarted rather than starving the node. The requests, which is what the scheduler promises, total about 6.3 GiB at the maxima. There are no CPU limits, on purpose: the autoscalers scale on CPU relative to the request, and a limit would throttle a pod just as it needs to burst.
+
+**Load.** `make hpa-test` loads the archive until an autoscaler adds replicas. With 80 scans uploaded at once, transcribe-worker went from 1 to 4 replicas at 197% of its CPU request and settled back afterwards; under random tile requests from inside the cluster (past the Ingress limit, which exists to stop exactly this) Cantaloupe went from 1 to 2 at 94% and also settled back. catalog-api scaled from 2 to 4 on its own while the demo data was being seeded. search-api was not pushed past its target: its public rate limit keeps one client from loading it.
 
 ## Wikidata
 

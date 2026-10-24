@@ -3,6 +3,7 @@
 import json
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOKEN = "indexer-token"
@@ -14,6 +15,9 @@ class FakeCatalog:
         self.views: dict[tuple[str, str], dict] = {}
         self.requests: list[str] = []
         self.failures = 0  # the next this-many view requests answer 503
+        self.delay = 0.0  # seconds a view request takes, so overlapping work can be seen
+        self.busy = 0
+        self.most_at_once = 0  # the most view requests that were being answered at the same moment
         self.lock = threading.Lock()
         fake = self
 
@@ -38,6 +42,11 @@ class FakeCatalog:
                 listing = re.fullmatch(r"/api/catalog/index/(document|ship|organisation)(?:\?(.*))?", self.path)
                 if single:
                     with fake.lock:
+                        fake.busy += 1
+                        fake.most_at_once = max(fake.most_at_once, fake.busy)
+                    time.sleep(fake.delay)
+                    with fake.lock:
+                        fake.busy -= 1
                         if fake.failures > 0:
                             fake.failures -= 1
                             return self._send(503, {"detail": "unavailable"})
