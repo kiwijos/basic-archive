@@ -57,6 +57,41 @@ jobs:
       - run: uv sync --frozen
       - run: uv run pytest -q
 
+  # The seed project runs the real catalog-api against Postgres, and real Tesseract on the scans it makes.
+  test-seed:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: archive_test
+        ports: ["55432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      rabbitmq:
+        image: rabbitmq:4.3.7-alpine
+        ports: ["56672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: seed
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Tesseract
+        working-directory: .
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-swe
+      - uses: astral-sh/setup-uv@v10.3.2
+      - run: uv sync --frozen
+      - run: uv run pytest -q
+
   test-web-ui:
     runs-on: ubuntu-latest
     defaults:
@@ -75,7 +110,7 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, test-web-ui]
+    needs: [test, test-seed, test-web-ui]
     runs-on: ubuntu-latest
     strategy:
       matrix:

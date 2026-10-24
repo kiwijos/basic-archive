@@ -19,6 +19,9 @@ class Subject(Base):
     kind: Mapped[str] = mapped_column(Text)
     # Facts from other sources, each with where it came from, its identifier and when it was fetched.
     external_refs: Mapped[list] = mapped_column(JSONB, server_default="[]")
+    # Where this record came from and its identifier there (see source_keys.py).
+    source_system: Mapped[str | None] = mapped_column(Text)
+    source_id: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     deleted_at: Mapped[datetime | None]
@@ -68,6 +71,8 @@ class Document(Base):
     )
     physical_location: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
+    source_system: Mapped[str | None] = mapped_column(Text)
+    source_id: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     deleted_at: Mapped[datetime | None]

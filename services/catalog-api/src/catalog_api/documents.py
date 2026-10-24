@@ -16,6 +16,7 @@ from catalog_api.models import Document, DocumentSubject, Image, Subject
 from catalog_api.names import current_name, find_subject
 from catalog_api.verification import Reading, readings_of
 from catalog_api.settings import Settings
+from catalog_api.source_keys import LIMIT, flush_or_conflict, key_from_form, lookup_filter, refuse_if_taken
 from catalog_api.storage import ObjectStorage
 from catalog_api.uploads import FileTooLarge, fingerprint, sniff_mime
 
@@ -84,6 +85,8 @@ class DocumentOut(BaseModel):
     verified: bool
     verified_images: int
     image_count: int
+    source_system: str | None
+    source_id: str | None
 
 
 class UploadOut(DocumentOut):
@@ -142,6 +145,8 @@ def document_fields(session: Session, document: Document) -> dict:
         "verified": bool(pages) and verified_pages == len(pages),
         "verified_images": verified_pages,
         "image_count": len(pages),
+        "source_system": document.source_system,
+        "source_id": document.source_id,
     }
 
 
@@ -152,6 +157,23 @@ def find_document(session: Session, document_id: uuid.UUID) -> Document:
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     return document
+
+
+@router.get("/documents", dependencies=[Depends(staff_name)])
+def find_documents_by_source(
+    key: tuple[str, str | None] = Depends(lookup_filter), session: Session = Depends(get_session)
+) -> list[DocumentOut]:
+    """Documents that came from one source: one by its full key, or all of a system's, oldest first."""
+    system, ident = key
+    query = (
+        select(Document)
+        .where(Document.source_system == system, Document.deleted_at.is_(None))
+        .order_by(Document.created_at)
+        .limit(LIMIT)
+    )
+    if ident is not None:
+        query = query.where(Document.source_id == ident)
+    return [DocumentOut(**document_fields(session, document)) for document in session.scalars(query)]
 
 
 @router.get("/documents/{document_id}", dependencies=[Depends(staff_name)])
@@ -330,11 +352,14 @@ def upload_document(
     physical_location: FormText = None,
     description: FormText = None,
     rights: Annotated[Rights, Form()] = "reserved",
+    source_system: FormText = None,
+    source_id: FormText = None,
     author: str = Depends(staff_name),
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
     storage: ObjectStorage = Depends(get_storage),
 ) -> UploadOut:
+    system, ident = key_from_form(source_system, source_id)
     if not title.strip():
         raise HTTPException(status_code=422, detail="A Document needs a title")
     try:
@@ -344,6 +369,7 @@ def upload_document(
 
     mime, sha256 = inspect_upload(file, settings)
     duplicate_of = earlier_upload_of(session, sha256)
+    refuse_if_taken(session, Document, system, ident, "A Document")
 
     document = Document(
         title=title.strip(),
@@ -351,9 +377,11 @@ def upload_document(
         period=period,
         physical_location=physical_location,
         description=description,
+        source_system=system,
+        source_id=ident,
         created_by=author,
     )
     session.add(document)
-    session.flush()
+    flush_or_conflict(session, system, ident, "A Document")
     store_page(session, storage, settings, document, file, mime, sha256, rights, 1, author)
     return UploadOut(**document_fields(session, document), duplicate_of_image_id=duplicate_of)

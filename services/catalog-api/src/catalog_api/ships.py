@@ -12,6 +12,7 @@ from catalog_api.db import get_session, soft_delete
 from catalog_api.events import record_changed
 from catalog_api.models import Ship, Subject, SubjectName
 from catalog_api.names import current_name
+from catalog_api.source_keys import LIMIT, SourceKeyIn, flush_or_conflict, lookup_filter, refuse_if_taken
 from catalog_api.relations import announce_counterparts
 
 router = APIRouter(prefix="/api/catalog")
@@ -27,7 +28,7 @@ class ShipFacts(BaseModel):
     fate_date: UncertainDate | None = None
 
 
-class ShipIn(ShipFacts):
+class ShipIn(ShipFacts, SourceKeyIn):
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
@@ -36,6 +37,8 @@ class ShipOut(ShipFacts):
     name: str | None
     created_by: str
     external_refs: list[dict]
+    source_system: str | None
+    source_id: str | None
 
 
 def ship_out(session: Session, subject: Subject, ship: Ship) -> ShipOut:
@@ -44,6 +47,8 @@ def ship_out(session: Session, subject: Subject, ship: Ship) -> ShipOut:
         name=current_name(session, subject.id),
         created_by=subject.created_by,
         external_refs=subject.external_refs,
+        source_system=subject.source_system,
+        source_id=subject.source_id,
         ship_type=ship.ship_type,
         tonnage=ship.tonnage,
         launched=present(ship.launched),
@@ -82,9 +87,10 @@ def create_ship(
     author: str = Depends(staff_name),
     session: Session = Depends(get_session),
 ) -> ShipOut:
-    subject = Subject(kind="ship", created_by=author)
+    refuse_if_taken(session, Subject, new.source_system, new.source_id, "A Ship or Organisation")
+    subject = Subject(kind="ship", created_by=author, source_system=new.source_system, source_id=new.source_id)
     session.add(subject)
-    session.flush()
+    flush_or_conflict(session, new.source_system, new.source_id, "A Ship or Organisation")
     ship = Ship(subject_id=subject.id)
     apply_facts(ship, new)
     session.add(ship)
@@ -92,6 +98,24 @@ def create_ship(
     session.flush()
     record_changed(session, subject)
     return ship_out(session, subject, ship)
+
+
+@router.get("/ships", dependencies=[Depends(staff_name)])
+def find_ships_by_source(
+    key: tuple[str, str | None] = Depends(lookup_filter), session: Session = Depends(get_session)
+) -> list[ShipOut]:
+    """Ships that came from one source: one by its full key, or all of a system's, oldest first."""
+    system, ident = key
+    query = (
+        select(Subject, Ship)
+        .join(Ship, Ship.subject_id == Subject.id)
+        .where(Subject.source_system == system, Subject.deleted_at.is_(None))
+        .order_by(Subject.created_at)
+        .limit(LIMIT)
+    )
+    if ident is not None:
+        query = query.where(Subject.source_id == ident)
+    return [ship_out(session, subject, ship) for subject, ship in session.execute(query)]
 
 
 @router.get("/ships/{ship_id}", dependencies=[Depends(staff_name)])

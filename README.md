@@ -12,6 +12,7 @@ A microservice archive for scanned ship documents. See [GLOSSARY.md](GLOSSARY.md
 
 ```
 make cluster-tools   # once per cluster: Traefik and metrics-server, versions pinned
+make demo            # deploy, wait for readiness, load the demo data, check it: an empty cluster to a working demo
 make deploy          # creates Secrets if missing, applies everything, waits for readiness
 make smoke           # exercises the API through the Ingress, Garage, and the OCR worker behind it
 make ocr-parallel    # three workers read ten uploaded pages at once, each exactly once
@@ -19,6 +20,8 @@ make resilience      # restarts RabbitMQ, kills catalog-api, deletes Meilisearch
 make e2e             # drives the web UI in a real browser: the staff review flow, and public search and landing pages
 make reindex         # rebuilds the whole search index from the catalog and waits for it
 make iiif-limits     # hammers image tiles through the Ingress: cache headers, 429 when excessive, recovery
+make seed            # load the demo data only (safe to run again); make demo-check reads it back
+make reset           # deletes the ship-archive namespace and ALL its data, after you type its name
 ```
 
 `make deploy` runs two Jobs each time, both safe to repeat: the database migration, and `garage-init`, which prepares Garage (cluster layout, the `masters` and `derivatives` buckets, one access key per service with only the rights it needs). Garage keeps its data on a 5 Gi volume and runs as a single instance.
@@ -30,6 +33,24 @@ The app is served on `http://localhost`. `make deploy` generates random Secrets 
 `http://localhost` is the public search page: free-text search with suggestions, filters and facets, highlighted results, and a verified or machine-transcribed badge on every Document. Its address holds the whole search, so reload and shared links give the same page. Every Ship, Organisation and Document has a permanent page (`/ships/{id}`, `/organisations/{id}`, `/documents/{id}`) showing names over time, relations, linked Documents, Rights and the text of each page; they are read from the search index through search-api, so no sign-in is needed and catalog-api stays private. The pages use only relative addresses, so they work behind any Ingress host. Staff sign in at `/review`. Open `http://localhost/review` and sign in with a staff token. Print yours with `kubectl -n ship-archive get secret catalog-api-secrets -o jsonpath='{.data.STAFF_TOKENS}' | base64 -d` (the format is `name=token`, comma-separated). Staff can upload a scan, wait for the machine's reading, correct it against the image, and save it as verified. The review queue lists every Document with a page nobody has verified yet, oldest first, 50 to a page. The scan is shown through a staff-only endpoint on catalog-api, because browsers cannot reach Garage; browsers cannot display TIFF, so a TIFF page offers a download instead. The staff token is kept in `sessionStorage`, so it is gone when the tab closes. For UI development, `cd services/web-ui && npm run dev` proxies `/api` to the cluster.
 
 An image rebuilt under a tag that is already deployed is not picked up by `make deploy`, and the cluster node keeps its cached copy too. To use a local rebuild, remove the node's copy and restart: `docker exec desktop-control-plane crictl rmi docker.io/kiwijos/ship-archive-<service>:<tag>` then `kubectl -n ship-archive rollout restart deployment/<service>`. Build from the repository root, for example `docker build -f services/catalog-api/Dockerfile -t kiwijos/ship-archive-catalog-api:<tag> .`, because every image copies `contracts/`.
+
+## Demo data
+
+`make demo` takes an empty cluster (after `make cluster-tools`) to a working demo in about a minute and can be run again: the second run changes nothing. It deploys, waits until everything is ready, loads the data with `seed/`, and then runs a read-only check that it can be found, opened and zoomed into. `make reset` empties the cluster first if you want to see it from nothing (it asks you to type the namespace name; a script without a terminal can pass `CONFIRM=ship-archive`).
+
+The data is a fictional fleet of 4 ships and 3 organisations (one ship has three names and was sold once, a rebuilt hull links back to it), 13 Swedish documents rendered as aged scans (clean, faded, skewed and speckled; PNG, JPEG and TIFF), some verified by a person, some machine-only and one half verified, and four real, public-domain Chapman ship plates from Wikimedia Commons to zoom into. The plates are fetched when seeding (about 30 MB, checked against recorded checksums, cached in `~/.cache/archive-seed/plates`, never committed); without a network they are skipped with a message. Everything, with its licence, is listed in [seed/SOURCES.md](seed/SOURCES.md), and the design is ADR 0008. Try searching for `Nordstjärnan`, a name the barque no longer has, or open the Hagbåt plate and zoom in.
+
+The seed measures how well the OCR (Tesseract, Swedish and English, as run by the worker on the cluster) reads the scans it knows the text of, and prints it at the end of `make seed` and `make demo-check`. Character accuracy is 1 minus the edits needed to turn the reading into the true text, divided by its length:
+
+| Scan | Pages | Accuracy |
+|---|---|---|
+| clean | 5 | 100.0 % |
+| faded | 4 | 94.3 % |
+| skewed | 2 | 100.0 % |
+| speckled | 3 | 88.3 % |
+| all | 14 | 96.3 % |
+
+These are for these particular synthetic pages, with typed text; handwriting and real damaged scans would read worse. The plates are drawings and are not measured. `make demo` ends with the check, not `make smoke`: the smoke test leaves throwaway Documents behind, which a demo should not contain, so it stays a separate command.
 
 ## Search
 
@@ -58,7 +79,7 @@ Every Document page has a deep-zoom viewer (OpenSeadragon) with labelled zoom, r
 
 ```
 make test-db   # throwaway Postgres (port 55432), RabbitMQ (port 56672) and Meilisearch (port 57700)
-make test      # API, worker, indexer, search-api and web-ui tests; the worker tests run real Tesseract
+make test      # API, worker, indexer, search-api, seed and web-ui tests; the worker and seed tests run real Tesseract
 ```
 
 ## Releasing images
