@@ -12,6 +12,7 @@ from catalog_api.events import record_changed
 from catalog_api.models import Organisation, Subject, SubjectName
 from catalog_api.names import current_name
 from catalog_api.relations import announce_counterparts
+from catalog_api.source_keys import LIMIT, SourceKeyIn, flush_or_conflict, lookup_filter, refuse_if_taken
 
 router = APIRouter(prefix="/api/catalog")
 
@@ -21,7 +22,7 @@ class OrganisationFacts(BaseModel):
     place: str | None = None
 
 
-class OrganisationIn(OrganisationFacts):
+class OrganisationIn(OrganisationFacts, SourceKeyIn):
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
@@ -29,6 +30,8 @@ class OrganisationOut(OrganisationFacts):
     id: uuid.UUID
     name: str | None
     created_by: str
+    source_system: str | None
+    source_id: str | None
 
 
 def organisation_out(
@@ -38,6 +41,8 @@ def organisation_out(
         id=subject.id,
         name=current_name(session, subject.id),
         created_by=subject.created_by,
+        source_system=subject.source_system,
+        source_id=subject.source_id,
         organisation_type=organisation.organisation_type,
         place=organisation.place,
     )
@@ -60,9 +65,10 @@ def create_organisation(
     author: str = Depends(staff_name),
     session: Session = Depends(get_session),
 ) -> OrganisationOut:
-    subject = Subject(kind="organisation", created_by=author)
+    refuse_if_taken(session, Subject, new.source_system, new.source_id, "A record")
+    subject = Subject(kind="organisation", created_by=author, source_system=new.source_system, source_id=new.source_id)
     session.add(subject)
-    session.flush()
+    flush_or_conflict(session, new.source_system, new.source_id, "A record")
     organisation = Organisation(
         subject_id=subject.id, organisation_type=new.organisation_type, place=new.place
     )
@@ -71,6 +77,24 @@ def create_organisation(
     session.flush()
     record_changed(session, subject)
     return organisation_out(session, subject, organisation)
+
+
+@router.get("/organisations", dependencies=[Depends(staff_name)])
+def find_organisations_by_source(
+    key: tuple[str, str | None] = Depends(lookup_filter), session: Session = Depends(get_session)
+) -> list[OrganisationOut]:
+    """Organisations that came from one source: one by its full key, or all of a system's, oldest first."""
+    system, ident = key
+    query = (
+        select(Subject, Organisation)
+        .join(Organisation, Organisation.subject_id == Subject.id)
+        .where(Subject.source_system == system, Subject.deleted_at.is_(None))
+        .order_by(Subject.created_at)
+        .limit(LIMIT)
+    )
+    if ident is not None:
+        query = query.where(Subject.source_id == ident)
+    return [organisation_out(session, subject, organisation) for subject, organisation in session.execute(query)]
 
 
 @router.get("/organisations/{organisation_id}", dependencies=[Depends(staff_name)])
