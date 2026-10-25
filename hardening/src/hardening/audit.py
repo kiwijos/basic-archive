@@ -107,7 +107,7 @@ def _pinned(image: str) -> bool:
     return ":" in name and not name.endswith(":latest")
 
 
-def _container_findings(workload: dict, pod: dict, container: dict) -> list[tuple[str, str]]:
+def _container_findings(pod: dict, container: dict) -> list[tuple[str, str]]:
     context = container.get("securityContext") or {}
     found = []
     if _effective(pod, container, "runAsNonRoot") is not True:
@@ -145,7 +145,7 @@ def _is_default_deny(policy: dict) -> bool:
     )
 
 
-def _secret_findings(document: dict) -> bool:
+def _holds_real_secret(document: dict) -> bool:
     for key, value in {**document.get("stringData", {}), **document.get("data", {})}.items():
         value = str(value)
         if PLACEHOLDER in value:
@@ -174,7 +174,7 @@ def audit(
             name, pod = _name(document), _pod(document)
             namespaces.add(document["metadata"].get("namespace", "default"))
             for container in _containers(pod):
-                for rule, detail in _container_findings(document, pod, container):
+                for rule, detail in _container_findings(pod, container):
                     key = (name, container["name"], rule)
                     if key in exceptions:
                         used.add(key)
@@ -195,7 +195,7 @@ def audit(
             violations.append(Violation("internal-service", _name(document), f"type {document['spec']['type']} is reachable from outside"))
         elif kind == "Ingress" and not document["spec"].get("tls"):
             violations.append(Violation("ingress-tls", _name(document), "no TLS section"))
-        elif kind == "Secret" and _secret_findings(document):
+        elif kind == "Secret" and _holds_real_secret(document):
             violations.append(Violation("no-real-secret", _name(document), "a value is not a CHANGE_ME placeholder"))
 
     for namespace in sorted(namespaces):

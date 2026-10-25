@@ -83,22 +83,29 @@ make security-test     # all of the above except trivy
 | Cantaloupe | Garage :3900 only |
 | migration and init Jobs | the one service each prepares (Postgres, Garage's admin port, Meilisearch) |
 
-Everything else is dropped, including everything from the stores themselves. Recorded run, 2026-10-25, from inside the pods (an `open` cell means the connection reached the service or was refused by it; `blocked` means it timed out):
+Everything else is dropped, including everything from the stores themselves. Recorded run, 2026-10-25, from inside the pods, from the Ingress controller's namespace (a throwaway pod wearing Traefik's labels, since its image has no shell, and one without them), and from the stores (an `open` cell means the connection reached the service or was refused by it; `blocked` means it timed out):
 
 ```
-from \ to          postgres  garage-s3 garage-adm rabbitmq  meili     catalog   search    web-ui    cantaloupe  inet:443  inet:80
-catalog-api        open      open      blocked    open      blocked   -         blocked   blocked   blocked     open      blocked
-search-api         blocked   blocked   blocked    blocked   open      blocked   -         blocked   blocked     blocked   blocked
-indexer            blocked   blocked   blocked    open      open      open      blocked   blocked   blocked     blocked   blocked
-transcribe-worker  blocked   open      blocked    open      blocked   open      blocked   blocked   blocked     blocked   blocked
-cantaloupe         blocked   open      blocked    blocked   blocked   blocked   blocked   blocked   -           blocked   blocked
-web-ui, postgres, rabbitmq, meilisearch: everything blocked
+from \ to           postgres      garage-s3     garage-admin  rabbitmq      meilisearch   catalog-api   search-api    web-ui        cantaloupe    internet:443  internet:80
+catalog-api         open       open       blocked    open       blocked    -             blocked    blocked    blocked    open       blocked
+search-api          blocked    blocked    blocked    blocked    open       blocked    -             blocked    blocked    blocked    blocked
+indexer             blocked    blocked    blocked    open       open       open       blocked    blocked    blocked    blocked    blocked
+transcribe-worker   blocked    open       blocked    open       blocked    open       blocked    blocked    blocked    blocked    blocked
+cantaloupe          blocked    open       blocked    blocked    blocked    blocked    blocked    blocked    -             blocked    blocked
+web-ui              blocked    blocked    blocked    blocked    blocked    blocked    blocked    -             blocked    blocked    blocked
+postgres            -             blocked    blocked    blocked    blocked    blocked    blocked    blocked    blocked    blocked    blocked
+rabbitmq            blocked    blocked    blocked    -             blocked    blocked    blocked    blocked    blocked    blocked    blocked
+meilisearch         blocked    blocked    blocked    blocked    -             blocked    blocked    blocked    blocked    blocked    blocked
+ingress-controller  blocked    blocked    blocked    blocked    blocked    open       open       open       open       -             -
+stranger            blocked    blocked    blocked    blocked    blocked    blocked    blocked    blocked    blocked    -             -
+
 search-api -> postgres:5432 is blocked (the connection timed out: the policies dropped it)
+OK: 16 allowed paths open and every other connection among 11 sources and 11 destinations is blocked
 ```
 
-12 allowed paths open and every other connection among 9 pods and 11 destinations blocked. The expected paths are written out by hand in the test from the ticket, not read from the policies, and a rogue policy that let search-api reach Postgres made it fail. The one thing outside the matrix is Garage as a source, which has no shell; it has no egress rule.
+16 allowed paths open and every other connection among 11 sources and 11 destinations blocked. The expected paths are written out by hand in the test from the ticket, not read from the policies, and a rogue policy that let search-api reach Postgres made it fail. Not probed as sources: Garage (its image has no shell, and it has no egress rule) and the init Jobs (they run once and exit). The policies are generated from one table (`hardening/src/hardening/policies.py`), and a test fails if the committed file differs from what it produces.
 
-**Credentials.** Each service holds only its own, and each credential was tried from inside the pod that holds it (31 checks, all passing):
+**Credentials.** Each service holds only its own, and each credential was tried from inside the pod that holds it (Cantaloupe's S3 key from the catalog-api pod, since its own image has no Python), 33 checks, all passing:
 
 | Credential | Does | Is refused |
 |---|---|---|
@@ -108,15 +115,17 @@ search-api -> postgres:5432 is blocked (the connection timed out: the policies d
 | search-api's Meilisearch key | search | adding a document, listing or creating keys, deleting an index, reading tasks |
 | the indexer's Meilisearch key | write the two indexes | listing or creating keys, deleting an index |
 | Cantaloupe's S3 key | read the originals | writing or deleting one |
-| the worker's service token | the worker's own endpoints | staff endpoints (HTTP 401) |
+| the worker's and the indexer's service tokens | their own endpoints | staff endpoints: the document list and the review queue (HTTP 401) |
 
 The Meilisearch master key is in exactly one pod's environment, Meilisearch's own (18 pods read), which is stricter than "only the indexer": the indexer holds a key derived from it. The broker's administrator login has no connections. **Known gap:** catalog-api connects to Postgres as the `postgres` superuser; a role limited to the catalog's tables is the fix, and the reason it is not done is in ADR 0010.
+
+**A limit of this environment.** The CNI on Docker Desktop (kindnet) enforces NetworkPolicies in user space, and its log shows bursts of `Could not receive message ... netlink receive` (247 in six hours of testing). Since the policies were added, `make rollout-test` and the browser tests have occasionally failed with requests that stalled for about five seconds, or tiles that failed to load: roughly one run in three of those two, right after a spike of connections, and never in the targeted experiments that tried to cause it (creating and deleting pods, deleting a replica under load, idle connections, with and without default-deny). The failing runs coincide with the error bursts, which points at the enforcer, but that is a correlation, not a proof. The probe in `rollout-test` reports each slow answer with its time, treats one over five seconds as a failure, and does not hide it. A production cluster would use a CNI that enforces in the kernel (Calico or Cilium); the policies themselves are standard and unchanged.
 
 **Containers.** Every container, Jobs and init containers included, runs non-root with all capabilities dropped, no privilege escalation, a read-only root filesystem and the default seccomp profile, and no pod gets a Kubernetes API token or the variables that advertise every Service. That includes Postgres, RabbitMQ and Garage. The audit lists its two exceptions with reasons (a one-time ownership fix for an older Garage volume) and fails if either becomes unnecessary.
 
 **HTTPS.** `https://localhost` serves the UI with a self-signed certificate that `make deploy` generates once (`ship-archive-tls`); your browser warns about it once. `make tls-test` checks it is the certificate in the Secret and not Traefik's default, that it verifies when trusted, and that TLS 1.1 is refused. Plain HTTP is still served, so the scripts on this machine need no certificate flags; a real deployment would redirect it. Real certificates in the cloud with cert-manager and Let's Encrypt are described, not built, in [docs/security/cloud-tls.md](docs/security/cloud-tls.md).
 
-**Images.** The trivy results for all six images, what was fixed (Pillow 11.3 to 13.0, FastAPI and Starlette, base images from Debian 12 to 13) and every accepted finding with its reason are in [docs/security/trivy.md](docs/security/trivy.md). In short: no image has a fixable finding left except Cantaloupe, whose 32 sit inside the upstream 5.0.7 jar, and the worker's unfixed ones weigh most because it parses untrusted files.
+**Images.** The trivy results for all six images, what was fixed (Pillow 11.3 to 13.0, FastAPI and Starlette, base images from Debian 12 to 13) and every accepted finding with its reason are in [docs/security/trivy.md](docs/security/trivy.md). In short: no image has a fixable finding left except Cantaloupe, whose 32 sit inside the upstream 5.0.7 jar and are an accepted risk, not a resolved one (the HTTP-handling ones should be treated as reachable); the worker's unfixed ones weigh most because it parses untrusted files. The init Jobs' image and the third-party stores are scanned too, which moved Postgres from 16.4 to 16.15.
 
 **Secrets.** Only templates are committed (`k8s/secrets.template.yaml`, placeholders only, checked by the audit). `make secrets-scan` searched for each of the 100 live secret values in the working tree and in all 39 commits, and found none.
 

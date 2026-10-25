@@ -7,9 +7,11 @@ set -euo pipefail
 work=$(mktemp -d)
 trap 'rm -f "$auth_header"; rm -rf "$work"' EXIT
 HTTPS=${HTTPS_URL:-https://localhost}
+host_port=${HTTPS#https://} # host or host:port, for the handshake below
+[[ $host_port == *:* ]] || host_port=$host_port:443
 
 kubectl -n "$NAMESPACE" get secret ship-archive-tls -o jsonpath='{.data.tls\.crt}' | base64 -d > "$work/secret.crt"
-echo | openssl s_client -connect localhost:443 -servername localhost 2>/dev/null | openssl x509 > "$work/served.crt"
+echo | openssl s_client -connect "$host_port" -servername "${host_port%%:*}" 2>/dev/null | openssl x509 > "$work/served.crt"
 
 secret_fp=$(openssl x509 -in "$work/secret.crt" -noout -fingerprint -sha256)
 served_fp=$(openssl x509 -in "$work/served.crt" -noout -fingerprint -sha256)

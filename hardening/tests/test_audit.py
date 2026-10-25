@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from hardening.audit import AUDIENCE, EXCEPTIONS, audit, load
+from hardening.policies import ALLOWED, render
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -223,3 +224,18 @@ def test_every_exception_of_this_repository_says_why():
     assert EXCEPTIONS
     for key, reason in EXCEPTIONS.items():
         assert len(reason) > 40, f"{key}: say why in a sentence"
+
+
+def test_the_policies_in_the_repository_are_what_the_table_of_paths_generates():
+    assert (ROOT / "k8s" / "network-policies.yaml").read_text() == render(), "run: uv run python -m hardening.policies > ../k8s/network-policies.yaml"
+
+
+def test_every_path_is_one_egress_rule_and_one_ingress_rule_because_a_connection_needs_both():
+    policies = [d for d in load(render()) if d["kind"] == "NetworkPolicy"]
+    egress = [p["metadata"]["name"] for p in policies if p["spec"]["policyTypes"] == ["Egress"] and p["metadata"]["name"].startswith("allow-") and "-to-" in p["metadata"]["name"]]
+    ingress = [p["metadata"]["name"] for p in policies if p["spec"]["policyTypes"] == ["Ingress"] and "-from-" in p["metadata"]["name"]]
+
+    assert len(egress) >= len(ALLOWED) and len(ingress) == len(ALLOWED)
+    for source, destination, port, _ in ALLOWED:
+        assert f"allow-{source}-to-{destination}" in egress
+        assert f"allow-{destination}-from-{source}" in ingress

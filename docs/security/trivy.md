@@ -24,7 +24,7 @@ All four service suites and the seed's suite pass on the new versions.
 
 ## What is accepted, and why
 
-No image has a fixed-and-unapplied finding except Cantaloupe's, and none has a secret in a layer. What remains has no corrected package or release to move to.
+No image has a fixed-and-unapplied finding except Cantaloupe's, and none has a secret in a layer. Apart from Cantaloupe's, what remains is a finding Debian has chosen not to fix or has not yet fixed, so there is no corrected package to move to.
 
 ### catalog-api (0 critical, 44 high)
 
@@ -144,7 +144,7 @@ Nothing to accept.
 
 ### cantaloupe (4 critical, 28 high)
 
-These are libraries bundled inside `cantaloupe-5.0.7.jar` (Jackson, Netty, Jetty, Tika, Bouncy Castle, plexus-utils). 5.0.7 (March 2025) is the newest Cantaloupe release, and replacing libraries inside its jar would give an unsupported, untested build, so a fix is not available to this project until upstream releases one. Each CVE was not analysed one by one; the acceptance rests on what Cantaloupe exposes and what it can reach. Only the IIIF Image API 3 is served (the admin and management API are off, no delegate script is enabled), through the Ingress with a per-address rate limit. Its only source is the fixed `masters` bucket in Garage, read with a read-only key, so a caller cannot make it fetch a URL of their choosing. A NetworkPolicy lets it talk only to Garage. It runs non-root on a read-only filesystem with no capabilities and no Kubernetes API token, and holds no credential that can change data. The finding to watch is the remote-request path through Jetty and Netty: the mitigation is exposure, and the remedy is upgrading Cantaloupe when a release is made.
+Unlike every other finding here, these are fixable: each has a corrected library version, but the libraries (Jackson, Netty, Jetty, Tika, Bouncy Castle, plexus-utils) are bundled inside `cantaloupe-5.0.7.jar`. 5.0.7 (March 2025) is the newest Cantaloupe release, and replacing libraries inside its jar would give an unsupported, untested build, so the remedy is a Cantaloupe release, and until then this is an accepted risk, not a resolved one. It is accepted on containment and on what is reachable, and the CVEs were not analysed one by one, so **the HTTP-handling ones (Jetty, Netty) should be treated as reachable by anyone who can reach the Ingress**: Traefik forwards only `/iiif/3`, but it does not make Jetty's request parsing safe. What limits the damage: only the IIIF Image API 3 is served (the admin and management API are off and no delegate script is enabled); its only source is the fixed `masters` bucket in Garage, read with a read-only key, so a caller cannot make it fetch a URL of their choosing; a NetworkPolicy lets it talk only to Garage; and it runs non-root on a read-only filesystem with no capabilities, no Kubernetes API token and no credential that can change data. The exact findings accepted are listed in `docs/security/cantaloupe-accepted.txt`, and `make trivy` fails if a new fixable one appears. The Bouncy Castle and Tika findings concern TLS and document parsing, which this configuration does not use (HTTPS is off in Cantaloupe, and no document format is read), but that was not verified at runtime.
 
 Status of these findings: 32 `fixed`.
 
@@ -162,6 +162,23 @@ Status of these findings: 32 `fixed`.
 | org.eclipse.jetty.http2:http2-common | 11.0.24 |  | 1 |
 | org.eclipse.jetty:jetty-http | 11.0.24 |  | 1 |
 | org.eclipse.jetty:jetty-security | 11.0.24 |  | 1 |
+
+## The other images the stack runs
+
+Not ours, so not part of the acceptance, but they run in the same namespace, so they are scanned too and a fixable HIGH or CRITICAL finding in any of them fails `make trivy`. Postgres 16.4, which the first scan found with 7 critical and 82 high findings, all fixable, was moved to 16.15 (the same major version, so the data directory is unchanged), and the init Jobs' Python base from `python:3.12.7-slim-bookworm` to `3.12.15-slim-trixie`.
+
+| Used for | Image | Base | Critical | High | High/critical with a fix |
+|---|---|---|---|---|---|
+| garage-init and meilisearch-init, one of which holds the Meilisearch master key | `python:3.12.15-slim-trixie` | debian 13.7 | 0 | 44 | 0 |
+| the database, and the migration Job's readiness wait | `postgres:16.15-alpine` | alpine 3.24.3 | 1 | 25 | 26 |
+| the broker | `rabbitmq:4.3.7-alpine` | alpine 3.23.7 | 0 | 0 | 0 |
+| object storage | `dxflrs/garage:v2.4.1` | no OS packages | 0 | 0 | 0 |
+| the search index | `getmeili/meilisearch:v1.55.0` | alpine 3.22.6 | 0 | 10 | 10 |
+| Garage's one-time ownership fix | `busybox:1.37.0` | no OS packages | 0 | 0 | 0 |
+
+**postgres.** Every remaining finding (1 critical, 25 high, all `stdlib` v1.24.6) is the Go standard library compiled into `gosu`, the helper the image's entrypoint uses to drop from root to the postgres user. This deployment starts as the postgres user (uid 70) from the first instruction, so `gosu` is never run; PostgreSQL itself and the Alpine packages have no fixable finding. A newer tag that rebuilds `gosu` removes them.
+
+**meilisearch.** v1.55.0 is the newest Meilisearch release. Its ten HIGH findings are Alpine packages with a fix in a newer Alpine that this release has not been rebuilt on, so there is nothing to change here short of building our own Meilisearch image. Meilisearch is reachable only from search-api (search key) and the indexer (index key) and runs non-root on a read-only filesystem; its master key is held by nothing else.
 
 ## What this does not show
 

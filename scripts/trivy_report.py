@@ -3,8 +3,8 @@
 python scripts/trivy_report.py VERSION [--no-scan]
 
 The explanations of what is accepted live here, next to the code that produces the numbers, so a rescan cannot
-quietly replace a reasoned acceptance with a bare count. A new HIGH or CRITICAL finding with a fix available, or one in a
-package that is not listed in ACCEPTED, makes the script exit 1.
+quietly replace a reasoned acceptance with a bare count. A HIGH or CRITICAL finding with a fix available makes the script exit 1, except
+the Cantaloupe findings already recorded in docs/security/cantaloupe-accepted.txt: a new one there fails too.
 """
 
 import collections
@@ -19,6 +19,29 @@ OUT = pathlib.Path("/tmp/trivy")
 TRIVY = "aquasec/trivy:0.58.0"
 REPOSITORY = "kiwijos/ship-archive"
 IMAGES = ["catalog-api", "transcribe-worker", "indexer", "search-api", "web-ui", "cantaloupe"]
+CANTALOUPE_ACCEPTED = ROOT / "docs" / "security" / "cantaloupe-accepted.txt"
+
+# Images the stack runs that are not ours: scanned and recorded, and a fixable HIGH or CRITICAL finding in them fails
+# the run, because for these the fix is a newer tag in a manifest. name -> (image, where it is used)
+OTHERS = {
+    "init Jobs": ("python:3.12.15-slim-trixie", "garage-init and meilisearch-init, one of which holds the Meilisearch master key"),
+    "postgres": ("postgres:16.15-alpine", "the database, and the migration Job's readiness wait"),
+    "rabbitmq": ("rabbitmq:4.3.7-alpine", "the broker"),
+    "garage": ("dxflrs/garage:v2.4.1", "object storage"),
+    "meilisearch": ("getmeili/meilisearch:v1.55.0", "the search index"),
+    "busybox": ("busybox:1.37.0", "Garage's one-time ownership fix"),
+}
+# Accepted because the newest upstream release is already in use and the fix is in the distribution's packages.
+OTHERS_ACCEPTED = {
+    "postgres": "Every remaining finding (1 critical, 25 high, all `stdlib` v1.24.6) is the Go standard library compiled into "
+    "`gosu`, the helper the image's entrypoint uses to drop from root to the postgres user. This deployment starts as the "
+    "postgres user (uid 70) from the first instruction, so `gosu` is never run; PostgreSQL itself and the Alpine packages have "
+    "no fixable finding. A newer tag that rebuilds `gosu` removes them.",
+    "meilisearch": "v1.55.0 is the newest Meilisearch release. Its ten HIGH findings are Alpine packages with a fix in a newer Alpine "
+    "that this release has not been rebuilt on, so there is nothing to change here short of building our own Meilisearch image. "
+    "Meilisearch is reachable only from search-api (search key) and the indexer (index key) and runs non-root on a read-only "
+    "filesystem; its master key is held by nothing else.",
+}
 
 # What was found on the first scan, of 0.11.0 (CRITICAL, HIGH), before anything was fixed.
 BEFORE = {
@@ -42,16 +65,20 @@ WORKER_REASON = (
     "so a crash loses one job, which the queue redelivers. It reads an image only after catalog-api has checked it."
 )
 JAR_REASON = (
-    "These are libraries bundled inside `cantaloupe-5.0.7.jar` (Jackson, Netty, Jetty, Tika, Bouncy Castle, plexus-utils). "
-    "5.0.7 (March 2025) is the newest Cantaloupe release, and replacing libraries inside its jar would give an "
-    "unsupported, untested build, so a fix is not available to this project until upstream releases one. Each CVE was "
-    "not analysed one by one; the acceptance rests on what Cantaloupe exposes and what it can reach. Only the IIIF "
-    "Image API 3 is served (the admin and management API are off, no delegate script is enabled), through the Ingress "
-    "with a per-address rate limit. Its only source is the fixed `masters` bucket in Garage, read with a read-only key, "
-    "so a caller cannot make it fetch a URL of their choosing. A NetworkPolicy lets it talk only to Garage. It runs "
-    "non-root on a read-only filesystem with no capabilities and no Kubernetes API token, and holds no credential "
-    "that can change data. The finding to watch is the remote-request path through Jetty and Netty: the mitigation is "
-    "exposure, and the remedy is upgrading Cantaloupe when a release is made."
+    "Unlike every other finding here, these are fixable: each has a corrected library version, but the libraries "
+    "(Jackson, Netty, Jetty, Tika, Bouncy Castle, plexus-utils) are bundled inside `cantaloupe-5.0.7.jar`. 5.0.7 (March 2025) "
+    "is the newest Cantaloupe release, and replacing libraries inside its jar would give an unsupported, untested build, so "
+    "the remedy is a Cantaloupe release, and until then this is an accepted risk, not a resolved one. It is accepted on "
+    "containment and on what is reachable, and the CVEs were not analysed one by one, so **the HTTP-handling ones (Jetty, "
+    "Netty) should be treated as reachable by anyone who can reach the Ingress**: Traefik forwards only `/iiif/3`, but it "
+    "does not make Jetty's request parsing safe. What limits the damage: only the IIIF Image API 3 is served (the admin and "
+    "management API are off and no delegate script is enabled); its only source is the fixed `masters` bucket in Garage, "
+    "read with a read-only key, so a caller cannot make it fetch a URL of their choosing; a NetworkPolicy lets it talk "
+    "only to Garage; and it runs non-root on a read-only filesystem with no capabilities, no Kubernetes API token and no "
+    "credential that can change data. The exact findings accepted are listed in `docs/security/cantaloupe-accepted.txt`, "
+    "and `make trivy` fails if a new fixable one appears. The Bouncy Castle and Tika findings concern TLS and document "
+    "parsing, which this configuration does not use (HTTPS is off in Cantaloupe, and no document format is read), but that "
+    "was not verified at runtime."
 )
 ACCEPTED = {
     "catalog-api": OS_REASON, "indexer": OS_REASON, "search-api": OS_REASON,
@@ -60,12 +87,13 @@ ACCEPTED = {
 }
 
 
-def scan(image: str, version: str) -> dict:
+
+def scan(name: str, reference: str) -> dict:
     OUT.mkdir(exist_ok=True)
-    result = OUT / f"{image}.json"
+    result = OUT / f"{name.replace(' ', '_')}.json"
     subprocess.run(
         ["docker", "run", "--rm", "-v", "/var/run/docker.sock:/var/run/docker.sock", "-v", "trivy-cache:/root/.cache/", "-v", f"{OUT}:/out", TRIVY,
-         "image", "--quiet", "--format", "json", "--output", f"/out/{image}.json", "--scanners", "vuln,secret,misconfig", f"{REPOSITORY}-{image}:{version}"],
+         "image", "--quiet", "--format", "json", "--output", f"/out/{result.name}", "--scanners", "vuln,secret,misconfig", reference],
         check=True,
     )
     return json.loads(result.read_text())
@@ -84,11 +112,12 @@ def summarise(report: dict) -> dict:
                 statuses[finding.get("Status", "?")] += 1
                 if finding.get("FixedVersion"):
                     fixable.append(finding)
-    return {"os": f"{report['Metadata']['OS']['Family']} {report['Metadata']['OS']['Name']}", "counts": counts, "fixable": fixable,
+    system = report["Metadata"].get("OS")  # an image built from scratch has none
+    return {"os": f"{system['Family']} {system['Name']}" if system else "no OS packages", "counts": counts, "fixable": fixable,
             "groups": groups, "statuses": statuses, "secrets": secrets, "misconfigs": misconfigs}
 
 
-def write(version: str, summaries: dict[str, dict]) -> str:
+def write(version: str, summaries: dict[str, dict], others: dict[str, dict]) -> str:
     lines = [
         "# Image scans (trivy)",
         "",
@@ -119,7 +148,7 @@ def write(version: str, summaries: dict[str, dict]) -> str:
         "",
         "## What is accepted, and why",
         "",
-        "No image has a fixed-and-unapplied finding except Cantaloupe's, and none has a secret in a layer. What remains has no corrected package or release to move to.",
+        "No image has a fixed-and-unapplied finding except Cantaloupe's, and none has a secret in a layer. Apart from Cantaloupe's, what remains is a finding Debian has chosen not to fix or has not yet fixed, so there is no corrected package to move to.",
         "",
     ]
     for image, s in summaries.items():
@@ -133,6 +162,22 @@ def write(version: str, summaries: dict[str, dict]) -> str:
                 lines.append(f"| {package} | {installed[:34]} | {counts['CRITICAL'] or ''} | {counts['HIGH'] or ''} |")
             lines.append("")
     lines += [
+        "## The other images the stack runs",
+        "",
+        "Not ours, so not part of the acceptance, but they run in the same namespace, so they are scanned too and a fixable HIGH or CRITICAL finding in any of them fails `make trivy`. "
+        "Postgres 16.4, which the first scan found with 7 critical and 82 high findings, all fixable, was moved to 16.15 (the same major version, so the data directory is unchanged), "
+        "and the init Jobs' Python base from `python:3.12.7-slim-bookworm` to `3.12.15-slim-trixie`.",
+        "",
+        "| Used for | Image | Base | Critical | High | High/critical with a fix |",
+        "|---|---|---|---|---|---|",
+    ]
+    for name, s in others.items():
+        image, use = OTHERS[name]
+        lines.append(f"| {use} | `{image}` | {s['os']} | {s['counts']['CRITICAL']} | {s['counts']['HIGH']} | {len(s['fixable'])} |")
+    lines.append("")
+    for name, reason in OTHERS_ACCEPTED.items():
+        lines += [f"**{name}.** {reason}", ""]
+    lines += [
         "## What this does not show",
         "",
         "A scan finds known vulnerabilities in what is installed. It does not show that the services themselves are free of faults, and a clean result today says nothing about tomorrow's database. "
@@ -142,20 +187,34 @@ def write(version: str, summaries: dict[str, dict]) -> str:
     return "\n".join(lines)
 
 
+def reports(references: dict[str, str], skip_scan: bool) -> dict[str, dict]:
+    out = {}
+    for name, reference in references.items():
+        result = OUT / f"{name.replace(' ', '_')}.json"
+        out[name] = summarise(json.loads(result.read_text()) if skip_scan else scan(name, reference))
+    return out
+
+
 def main() -> int:
     version = sys.argv[1]
-    summaries = {}
-    for image in IMAGES:
-        report = scan(image, version) if "--no-scan" not in sys.argv else json.loads((OUT / f"{image}.json").read_text())
-        summaries[image] = summarise(report)
+    skip = "--no-scan" in sys.argv
+    summaries = reports({image: f"{REPOSITORY}-{image}:{version}" for image in IMAGES}, skip)
+    others = reports({name: image for name, (image, _) in OTHERS.items()}, skip)
     target = ROOT / "docs" / "security" / "trivy.md"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(write(version, summaries))
+    target.write_text(write(version, summaries, others))
     print(f"wrote {target.relative_to(ROOT)}")
-    bad = [image for image, s in summaries.items() if image != "cantaloupe" and (s["fixable"] or s["secrets"])]
-    for image in bad:
-        print(f"FAIL {image}: a high/critical finding has a fix, or a secret is in a layer")
-    return 1 if bad else 0
+
+    accepted = set(CANTALOUPE_ACCEPTED.read_text().split()) if CANTALOUPE_ACCEPTED.exists() else set()
+    fixable_now = {f["VulnerabilityID"] for f in summaries["cantaloupe"]["fixable"]}
+    if not skip and not accepted:
+        CANTALOUPE_ACCEPTED.write_text("\n".join(sorted(fixable_now)) + "\n")  # first run: record what is accepted today
+        accepted = fixable_now
+    problems = [f"FAIL {image}: a high/critical finding has a fix, or a secret is in a layer" for image, s in summaries.items() if image != "cantaloupe" and (s["fixable"] or s["secrets"])]
+    problems += [f"FAIL {name}: a high/critical finding has a fix" for name, s in others.items() if s["fixable"] and name not in OTHERS_ACCEPTED]
+    problems += [f"FAIL cantaloupe: new fixable finding {cve} is not in {CANTALOUPE_ACCEPTED.name}" for cve in sorted(fixable_now - accepted)]
+    print("\n".join(problems) or f"OK: nothing new; {len(accepted)} Cantaloupe findings accepted")
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":

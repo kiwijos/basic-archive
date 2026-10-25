@@ -15,8 +15,9 @@ import urllib.error
 import urllib.request
 
 WORKERS = 4
-TIMEOUT = 30  # long enough to tell a request that was merely slow from one that never got an answer
-SLOW = 2.0
+TIMEOUT = 30  # long enough to see how slow a stalled request really was, instead of cutting it off
+FAIL_AFTER = 5.0  # an answer that takes longer than this is a failure: a visitor would have given up
+SLOW = 2.0  # answers between this and FAIL_AFTER are reported but do not fail the run
 
 
 def main() -> int:
@@ -45,6 +46,8 @@ def main() -> int:
             except Exception as error:  # noqa: BLE001 - a refused or reset connection is a failure to count, not to crash on
                 result = f"error {type(error).__name__}"
             took = time.monotonic() - started
+            if result == "ok" and took > FAIL_AFTER:
+                result = f"too slow ({took:.0f} s)"
             with lock:
                 outcomes[result] += 1
                 if result != "ok":
@@ -58,7 +61,7 @@ def main() -> int:
         thread.start()
     for thread in threads:
         thread.join()
-    failed = {kind: count for kind, count in outcomes.items() if kind != "ok"}
+    failed = {kind.split(" (")[0] if kind.startswith("too slow") else kind: count for kind, count in outcomes.items() if kind != "ok"}
     print(f"{sum(outcomes.values())} requests, {outcomes['ok']} ok" + (f", FAILED: {failed}" if failed else ""))
     if slow:
         print(f"  {len(slow)} answered, but slowly (over {SLOW:g} s); the slowest took {max(t for _, t in slow):.1f} s, at " + ", ".join(f"{at:.1f}s" for at, _ in sorted(slow)[:6]))

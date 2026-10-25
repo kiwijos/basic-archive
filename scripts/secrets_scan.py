@@ -17,9 +17,10 @@ import subprocess
 import sys
 import tempfile
 
+from trivy_report import TRIVY  # the one place the scanner image is pinned
+
 NAMESPACE = "ship-archive"
 MIN_LENGTH = 12  # shorter values (a user name, a database name) are not secrets and would match everywhere
-TRIVY = "aquasec/trivy:0.58.0"
 
 
 def run(*args, **kwargs) -> subprocess.CompletedProcess:

@@ -1,8 +1,8 @@
 """Proves that each service's credentials open only what that service needs, using the credentials as they are in the pods.
 
 Each check runs inside the pod that holds the credential, reading it from that pod's own environment, so nothing here
-sees a secret except to compare it. The checks that take a credential from another service (the read-only S3 key, tried
-from catalog-api, which may reach Garage) pass it on standard input, never on a command line.
+sees a secret except to compare it. The one exception is S3: Cantaloupe's image has no Python, so its read-only key is
+tried from the catalog-api pod, which may reach Garage, and the key is passed on standard input, never on a command line.
 """
 
 import base64
@@ -27,6 +27,13 @@ def check(name: str, got: str, expected: str) -> None:
     print(f"  {'ok  ' if ok else 'FAIL'} {name}" + ("" if ok else f": expected {expected!r}, got {got!r}"))
     if not ok:
         failures.append(name)
+
+
+def check_answers(who: str, out: str, wants: dict[str, str]) -> None:
+    """Compare a script's "what: answer" lines with what each action was expected to give."""
+    got = dict(line.rsplit(": ", 1) for line in out.splitlines() if ": " in line)
+    for action, want in wants.items():
+        check(f"{who}: {action}", got.get(action, f"no answer ({out[-120:]})"), want)
 
 
 def secret(name: str, key: str) -> str:
@@ -105,10 +112,7 @@ EXPECT_BROKER = {
 def broker() -> None:
     print("RabbitMQ: each service's own login, tried against what it should and should not do")
     for service, (script, expected) in EXPECT_BROKER.items():
-        out = run_in(f"deploy/{service}", script)
-        got = dict(line.rsplit(": ", 1) for line in out.splitlines() if ": " in line)
-        for action, want in expected.items():
-            check(f"{service}: {action}", got.get(action, f"no answer ({out[-120:]})"), want)
+        check_answers(service, run_in(f"deploy/{service}", script), expected)
 
 
 # ---- Meilisearch: a search-only key and an index-only key, never the master key ----------------------------------
@@ -144,10 +148,7 @@ def meili() -> None:
     for service, wants in expected.items():
         # Only what this key is expected to be refused (or, for search, allowed): a write the indexer's key is
         # permitted to make would put a stray document in the real index.
-        out = run_in(f"deploy/{service}", MEILI, json.dumps({name: probes[name] for name in wants}))
-        got = dict(line.rsplit(": ", 1) for line in out.splitlines() if ": " in line)
-        for action, want in wants.items():
-            check(f"{service}: {action}", got.get(action, f"no answer ({out[-120:]})"), want)
+        check_answers(service, run_in(f"deploy/{service}", MEILI, json.dumps({name: probes[name] for name in wants})), wants)
 
 
 def master_key_only_with_meilisearch() -> None:
@@ -194,10 +195,7 @@ def s3() -> None:
         ("catalog-api-s3", {"read the masters bucket": "allowed", "write to the masters bucket": "allowed", "delete from the masters bucket": "allowed"}),
     ):
         key = json.dumps({"id": secret(secret_name, "S3_ACCESS_KEY_ID"), "secret": secret(secret_name, "S3_SECRET_ACCESS_KEY")})
-        out = run_in("deploy/catalog-api", S3, key)
-        got = dict(line.rsplit(": ", 1) for line in out.splitlines() if ": " in line)
-        for action, want in wants.items():
-            check(f"{secret_name.removesuffix('-s3')}: {action}", got.get(action, f"no answer ({out[-120:]})"), want)
+        check_answers(secret_name.removesuffix("-s3"), run_in("deploy/catalog-api", S3, key), wants)
 
 
 # ---- Catalog tokens: the worker's service token is not a staff token ----------------------------------------------
@@ -210,16 +208,14 @@ def status(path):
         with urllib.request.urlopen(request, timeout=10) as r: return r.status
     except urllib.error.HTTPError as e: return e.code
 print("staff documents list:", status("/api/catalog/documents?source_system=seed"))
-print("review queue:", status("/api/catalog/review/queue"))
+print("review queue:", status("/api/catalog/review-queue"))
 '''
 
 
 def tokens() -> None:
     print("Catalog tokens: the worker's service token cannot do what staff can")
     for service in ("transcribe-worker", "indexer"):
-        out = run_in(f"deploy/{service}", TOKEN)
-        got = dict(line.rsplit(": ", 1) for line in out.splitlines() if ": " in line)
-        check(f"{service}: staff documents list", got.get("staff documents list", out[-100:]), "401")
+        check_answers(service, run_in(f"deploy/{service}", TOKEN), {"staff documents list": "401", "review queue": "401"})
 
 
 def main() -> int:

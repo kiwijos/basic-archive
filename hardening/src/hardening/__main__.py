@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from hardening.audit import AUDIENCE, EXCEPTIONS, audit, load
+from hardening.audit import AUDIENCE, EXCEPTIONS, WORKLOADS, audit, load
 
 
 def main() -> int:
@@ -14,7 +14,7 @@ def main() -> int:
     findings = audit(documents, exceptions=EXCEPTIONS, audience=AUDIENCE)
     for finding in findings:
         print(f"FAIL {finding}")
-    workloads = sum(1 for d in documents if d.get("kind") in {"Deployment", "StatefulSet", "DaemonSet", "Job"})
+    workloads = sum(1 for d in documents if d.get("kind") in WORKLOADS)
     print(f"{workloads} workloads audited, {len(findings)} finding(s), {len(EXCEPTIONS)} stated exception(s)")
     return 1 if findings else 0
 

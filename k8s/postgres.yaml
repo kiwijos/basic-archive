@@ -35,7 +35,7 @@ spec:
         fsGroup: 70
       containers:
         - name: postgres
-          image: postgres:16.4-alpine
+          image: postgres:16.15-alpine
           ports:
             - containerPort: 5432
           env:

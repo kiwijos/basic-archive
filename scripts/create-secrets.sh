@@ -74,8 +74,9 @@ if missing cantaloupe-s3; then
   create_s3_secret cantaloupe-s3
 fi
 
-# The broker has one login for now, used by catalog-api and the worker; separate users per service
-# are part of the security hardening. The worker acts on the API with a token of its own.
+# A first login for the broker, used until the separate per-service logins below replace it in each service's URL (the
+# broker's own login is then the administrator's and nothing connects as it). The worker acts on the API with a
+# token of its own.
 if missing rabbitmq-credentials; then
   BROKER_PASSWORD=$(random)
   WORKER_TOKEN=$(random)
@@ -184,10 +185,23 @@ fi
 # it. Each service gets a login and password of its own, created by the broker when it starts
 # (k8s/rabbitmq/provision.sh), and its RABBITMQ_URL is rewritten to use it. This also moves a cluster from before
 # slice 13, where all three shared the administrator's login, onto separate ones.
+#
+# The rabbitmq-users Secret is created LAST and marks the work as done: if this dies half way, a rerun finds it missing
+# and starts again with fresh passwords, so the URLs and the broker's logins can never end up disagreeing. For a moment
+# after the services are restarted with their new URLs the broker may not have created the logins yet (it does so when
+# it restarts, which `make deploy` does next); the services retry their connection until it does.
 if missing rabbitmq-users; then
   CATALOG_API_PASSWORD=$(random)
   TRANSCRIBE_WORKER_PASSWORD=$(random)
   INDEXER_PASSWORD=$(random)
+  set_broker_login() { # set_broker_login SECRET LOGIN PASSWORD: point the secret's RABBITMQ_URL at that login
+    kubectl -n "$NAMESPACE" patch secret "$1" --type merge --patch-file /dev/stdin >/dev/null <<EOF
+{"stringData": {"RABBITMQ_URL": "amqp://$2:$3@rabbitmq:5672/%2F"}}
+EOF
+  }
+  set_broker_login catalog-api-amqp catalog-api "$CATALOG_API_PASSWORD"
+  set_broker_login transcribe-worker-env transcribe-worker "$TRANSCRIBE_WORKER_PASSWORD"
+  set_broker_login indexer-env indexer "$INDEXER_PASSWORD"
   kubectl -n "$NAMESPACE" create -f - >/dev/null <<EOF
 apiVersion: v1
 kind: Secret
@@ -199,14 +213,6 @@ stringData:
   TRANSCRIBE_WORKER_PASSWORD: "$TRANSCRIBE_WORKER_PASSWORD"
   INDEXER_PASSWORD: "$INDEXER_PASSWORD"
 EOF
-  set_broker_login() { # set_broker_login SECRET LOGIN PASSWORD: point the secret's RABBITMQ_URL at that login
-    kubectl -n "$NAMESPACE" patch secret "$1" --type merge --patch-file /dev/stdin >/dev/null <<EOF
-{"stringData": {"RABBITMQ_URL": "amqp://$2:$3@rabbitmq:5672/%2F"}}
-EOF
-  }
-  set_broker_login catalog-api-amqp catalog-api "$CATALOG_API_PASSWORD"
-  set_broker_login transcribe-worker-env transcribe-worker "$TRANSCRIBE_WORKER_PASSWORD"
-  set_broker_login indexer-env indexer "$INDEXER_PASSWORD"
   for deployment in catalog-api transcribe-worker indexer; do
     kubectl -n "$NAMESPACE" rollout restart "deployment/$deployment" >/dev/null 2>&1 || true
   done

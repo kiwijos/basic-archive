@@ -114,7 +114,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: init
-          image: python:3.12.7-slim-bookworm
+          image: python:3.12.15-slim-trixie
           command: ["python", "/init/init.py"]
           securityContext:
             runAsNonRoot: true

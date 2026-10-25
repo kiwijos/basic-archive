@@ -14,7 +14,13 @@ fi
 rabbitmqctl import_definitions /etc/rabbitmq/definitions.json
 
 login() { # login NAME PASSWORD CONFIGURE WRITE READ (the last three are patterns for the names it may use)
-  rabbitmqctl -q add_user "$1" "$2" 2>/dev/null || rabbitmqctl -q change_password "$1" "$2"
+  # rabbitmqctl takes the password as an argument, so it is in this container's process list for the instant the
+  # command runs, to processes in the broker's own container only. The check keeps a real failure of add_user visible.
+  if rabbitmqctl -q list_users | cut -f1 | grep -qx "$1"; then
+    rabbitmqctl -q change_password "$1" "$2"
+  else
+    rabbitmqctl -q add_user "$1" "$2"
+  fi
   rabbitmqctl -q set_permissions -p / "$1" "$3" "$4" "$5"
 }
 
