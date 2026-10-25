@@ -58,8 +58,16 @@ class OutboxRelay:
                 self._stopping.wait(RECONNECT_PAUSE_SECONDS)
                 continue
             if published == 0:
-                self._stopping.wait(self._interval)
+                self._idle(connection)
         self._close(connection)
+
+    def _idle(self, connection) -> None:
+        """Wait for the next pass while answering the broker's heartbeats: a blocking connection only does so
+        when it is given the chance, and the broker closes one that stays silent."""
+        try:
+            connection.process_data_events(time_limit=self._interval)
+        except Exception:
+            self._stopping.wait(self._interval)  # the next publish notices and reconnects, with a log line
 
     @staticmethod
     def _close(connection) -> None:

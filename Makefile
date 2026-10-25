@@ -1,4 +1,4 @@
-.PHONY: cluster-tools secrets deploy demo seed demo-check reset smoke e2e reindex iiif-limits ocr-parallel resilience test test-db
+.PHONY: cluster-tools secrets deploy demo seed demo-check reset scale-test rollout-test persistence-test hpa-test smoke e2e reindex iiif-limits ocr-parallel resilience test test-db
 
 # One-time cluster prerequisites: Traefik and metrics-server (needs helm).
 cluster-tools:
@@ -41,6 +41,22 @@ demo-check:
 # Deletes the ship-archive namespace and everything in it, after asking. Then `make demo` starts from nothing.
 reset:
 	./scripts/reset.sh
+
+# Every service at three replicas under real traffic, with restarts, readiness and peak memory checked.
+scale-test:
+	./scripts/scale-test.sh
+
+# Rolls every service while requests go through the Ingress; none may fail and no work may be lost.
+rollout-test:
+	./scripts/rollout-test.sh
+
+# Deletes the Postgres, Garage, Meilisearch and RabbitMQ pods one at a time and checks nothing was lost.
+persistence-test:
+	./scripts/persistence-test.sh
+
+# Loads the archive until an autoscaler adds replicas, then waits for it to settle back (takes about five minutes).
+hpa-test:
+	./scripts/hpa-test.sh
 
 smoke:
 	./scripts/smoke.sh
