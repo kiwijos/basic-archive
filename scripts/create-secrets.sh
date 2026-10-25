@@ -180,4 +180,59 @@ stringData:
 EOF
 fi
 
+# Separate broker logins: the broker's own login (rabbitmq-credentials) is the administrator and nothing connects as
+# it. Each service gets a login and password of its own, created by the broker when it starts
+# (k8s/rabbitmq/provision.sh), and its RABBITMQ_URL is rewritten to use it. This also moves a cluster from before
+# slice 13, where all three shared the administrator's login, onto separate ones.
+if missing rabbitmq-users; then
+  CATALOG_API_PASSWORD=$(random)
+  TRANSCRIBE_WORKER_PASSWORD=$(random)
+  INDEXER_PASSWORD=$(random)
+  kubectl -n "$NAMESPACE" create -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rabbitmq-users
+type: Opaque
+stringData:
+  CATALOG_API_PASSWORD: "$CATALOG_API_PASSWORD"
+  TRANSCRIBE_WORKER_PASSWORD: "$TRANSCRIBE_WORKER_PASSWORD"
+  INDEXER_PASSWORD: "$INDEXER_PASSWORD"
+EOF
+  set_broker_login() { # set_broker_login SECRET LOGIN PASSWORD: point the secret's RABBITMQ_URL at that login
+    kubectl -n "$NAMESPACE" patch secret "$1" --type merge --patch-file /dev/stdin >/dev/null <<EOF
+{"stringData": {"RABBITMQ_URL": "amqp://$2:$3@rabbitmq:5672/%2F"}}
+EOF
+  }
+  set_broker_login catalog-api-amqp catalog-api "$CATALOG_API_PASSWORD"
+  set_broker_login transcribe-worker-env transcribe-worker "$TRANSCRIBE_WORKER_PASSWORD"
+  set_broker_login indexer-env indexer "$INDEXER_PASSWORD"
+  for deployment in catalog-api transcribe-worker indexer; do
+    kubectl -n "$NAMESPACE" rollout restart "deployment/$deployment" >/dev/null 2>&1 || true
+  done
+fi
+
+# The Ingress's certificate: self-signed, for localhost, valid for a year. A browser warns about it once; a real
+# deployment replaces it with a certificate from a CA (see the README). The key goes to kubectl on stdin.
+if missing ship-archive-tls; then
+  tls_dir=$(mktemp -d)
+  trap 'rm -rf "$tls_dir"' EXIT
+  ( umask 077
+    openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+      -keyout "$tls_dir/tls.key" -out "$tls_dir/tls.crt" \
+      -subj "/CN=localhost/O=Ship Archive Lite (self-signed)" \
+      -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null )
+  kubectl -n "$NAMESPACE" create -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ship-archive-tls
+type: kubernetes.io/tls
+data:
+  tls.crt: $(base64 < "$tls_dir/tls.crt" | tr -d '\n')
+  tls.key: $(base64 < "$tls_dir/tls.key" | tr -d '\n')
+EOF
+  rm -rf "$tls_dir"
+fi
+
 echo "Secrets are in place."

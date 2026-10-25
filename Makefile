@@ -1,4 +1,4 @@
-.PHONY: cluster-tools secrets deploy demo seed demo-check reset scale-test rollout-test persistence-test hpa-test smoke e2e reindex iiif-limits ocr-parallel resilience test test-db
+.PHONY: cluster-tools secrets deploy demo seed demo-check reset audit netpol-test credentials-test exposure-test tls-test secrets-scan trivy security-test scale-test rollout-test persistence-test hpa-test smoke e2e reindex iiif-limits ocr-parallel resilience test test-db
 
 # One-time cluster prerequisites: Traefik and metrics-server (needs helm).
 cluster-tools:
@@ -41,6 +41,38 @@ demo-check:
 # Deletes the ship-archive namespace and everything in it, after asking. Then `make demo` starts from nothing.
 reset:
 	./scripts/reset.sh
+
+# Static check of the manifests against the security rules (non-root, no capabilities, read-only filesystems, no API
+# tokens, default-deny, who may read each Secret, TLS on the Ingress, no real secret). Needs no cluster.
+audit:
+	cd hardening && uv run python -m hardening
+
+# Tries every internal connection from inside the running pods: the agreed ones open, every other one blocked.
+netpol-test:
+	python3 scripts/netpol_test.py
+
+# Each service's own credentials (RabbitMQ login, Meilisearch key, S3 key, token) do only what that service needs.
+credentials-test:
+	python3 scripts/credentials_test.py
+
+# Only the four public-facing services are reachable from outside the cluster.
+exposure-test:
+	./scripts/exposure-test.sh
+
+# HTTPS through the Ingress with the self-signed certificate, and that it is the certificate in the cluster's Secret.
+tls-test:
+	./scripts/tls-test.sh
+
+# No secret in any file, and none of the cluster's live secret values anywhere in the repository's history.
+secrets-scan:
+	python3 scripts/secrets_scan.py
+
+# Scans the six images of a release with trivy and rewrites docs/security/trivy.md: make trivy VERSION=0.12.0
+trivy:
+	python3 scripts/trivy_report.py $(VERSION)
+
+# All the security proofs against the running cluster, and the static audit.
+security-test: audit netpol-test credentials-test exposure-test tls-test secrets-scan
 
 # Every service at three replicas under real traffic, with restarts, readiness and peak memory checked.
 scale-test:
@@ -100,4 +132,5 @@ test:
 	cd services/indexer && uv run pytest -q
 	cd services/search-api && uv run pytest -q
 	cd seed && uv run pytest -q
+	cd hardening && uv run pytest -q
 	cd services/web-ui && npm test

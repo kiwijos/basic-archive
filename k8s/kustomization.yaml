@@ -15,6 +15,7 @@ resources:
   - ingress-iiif.yaml
   - ingress.yaml
   - autoscaling.yaml
+  - network-policies.yaml
 configMapGenerator:
   - name: garage-config
     namespace: ship-archive
@@ -28,6 +29,7 @@ configMapGenerator:
     namespace: ship-archive
     files:
       - rabbitmq/definitions.json
+      - rabbitmq/provision.sh
   - name: meilisearch-init
     namespace: ship-archive
     files:
@@ -36,14 +38,14 @@ configMapGenerator:
 # One version tag per slice; every custom image is pinned to it and never uses latest.
 images:
   - name: kiwijos/ship-archive-catalog-api
-    newTag: 0.11.0
+    newTag: 0.12.0
   - name: kiwijos/ship-archive-transcribe-worker
-    newTag: 0.11.0
+    newTag: 0.12.0
   - name: kiwijos/ship-archive-web-ui
-    newTag: 0.11.0
+    newTag: 0.12.0
   - name: kiwijos/ship-archive-indexer
-    newTag: 0.11.0
+    newTag: 0.12.0
   - name: kiwijos/ship-archive-search-api
-    newTag: 0.11.0
+    newTag: 0.12.0
   - name: kiwijos/ship-archive-cantaloupe
-    newTag: 0.11.0
+    newTag: 0.12.0

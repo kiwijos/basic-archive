@@ -26,6 +26,8 @@ spec:
       labels:
         app: meilisearch
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       securityContext:
         fsGroup: 10001
       containers:
@@ -103,7 +105,12 @@ metadata:
 spec:
   backoffLimit: 10
   template:
+    metadata:
+      labels:
+        app: meilisearch-init
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       restartPolicy: OnFailure
       containers:
         - name: init
@@ -116,6 +123,8 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             requests:
               cpu: 10m

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Ship Archive Lite read side: public search"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "fastapi==0.115.6",
+    "fastapi==0.162.0",
     "httpx==0.28.1",
     "pydantic-settings==2.7.0",
     "uvicorn==0.34.0",

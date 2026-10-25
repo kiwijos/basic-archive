@@ -30,6 +30,8 @@ spec:
       labels:
         app: search-api
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       containers:
         - name: search-api
           image: kiwijos/ship-archive-search-api

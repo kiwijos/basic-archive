@@ -92,6 +92,21 @@ jobs:
       - run: uv sync --frozen
       - run: uv run pytest -q
 
+  # The manifests against the security rules, and a scan of every file for secrets. Neither needs a cluster.
+  test-hardening:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
+      - name: Test the audit, then audit the manifests
+        working-directory: hardening
+        run: |
+          uv sync --frozen
+          uv run pytest -q
+          uv run python -m hardening
+      - name: Scan the repository for secrets
+        run: docker run --rm -v "$PWD:/src:ro" aquasec/trivy:0.58.0 fs --scanners secret --exit-code 1 --skip-dirs /src/.git /src
+
   test-web-ui:
     runs-on: ubuntu-latest
     defaults:
@@ -110,7 +125,7 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, test-seed, test-web-ui]
+    needs: [test, test-seed, test-hardening, test-web-ui]
     runs-on: ubuntu-latest
     strategy:
       matrix:

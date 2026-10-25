@@ -64,7 +64,26 @@ start_tile_load() { # start_tile_load IMAGE_ID SECONDS: 24 clients inside the cl
   width=$(curl -sf "$BASE_URL/iiif/3/$image/info.json" | jq -r .width)
   tag=$(kubectl -n "$NAMESPACE" get deploy search-api -o jsonpath='{.spec.template.spec.containers[0].image}' | cut -d: -f2)
   kubectl -n "$NAMESPACE" delete pod tile-load --ignore-not-found --wait=true >/dev/null
-  kubectl -n "$NAMESPACE" run tile-load --restart=Never --image="kiwijos/ship-archive-search-api:$tag" --image-pull-policy=IfNotPresent \
+  # The default-deny policies would stop this pod, so for as long as it runs it is allowed to reach Cantaloupe and
+  # nothing else. The allowance is removed by stop_tile_load, and is not part of the real policies.
+  kubectl -n "$NAMESPACE" apply -f - >/dev/null <<POLICY
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: tile-load-egress}
+spec:
+  podSelector: {matchLabels: {app: tile-load}}
+  policyTypes: [Egress]
+  egress: [{to: [{podSelector: {matchLabels: {app: cantaloupe}}}], ports: [{protocol: TCP, port: 8182}]}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: tile-load-ingress}
+spec:
+  podSelector: {matchLabels: {app: cantaloupe}}
+  policyTypes: [Ingress]
+  ingress: [{from: [{podSelector: {matchLabels: {app: tile-load}}}], ports: [{protocol: TCP, port: 8182}]}]
+POLICY
+  kubectl -n "$NAMESPACE" run tile-load --labels=app=tile-load --restart=Never --image="kiwijos/ship-archive-search-api:$tag" --image-pull-policy=IfNotPresent \
     --env="IMAGE=$image" --env="WIDTH=$width" --env="SECONDS_TO_RUN=$seconds" --command -- python -c '
 import os, random, threading, time, urllib.request
 image, width, until = os.environ["IMAGE"], int(os.environ["WIDTH"]), time.time() + int(os.environ["SECONDS_TO_RUN"])
@@ -83,4 +102,7 @@ threads = [threading.Thread(target=fetch) for _ in range(24)]
   echo "tile load: random tiles of $image (${width} px wide), 24 clients, ${seconds} s"
 }
 
-stop_tile_load() { kubectl -n "$NAMESPACE" delete pod tile-load --ignore-not-found --wait=false >/dev/null 2>&1 || true; }
+stop_tile_load() {
+  kubectl -n "$NAMESPACE" delete pod tile-load --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kubectl -n "$NAMESPACE" delete networkpolicy tile-load-egress tile-load-ingress --ignore-not-found >/dev/null 2>&1 || true
+}

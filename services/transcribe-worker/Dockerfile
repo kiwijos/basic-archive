@@ -1,4 +1,4 @@
-FROM python:3.12.7-slim-bookworm AS build
+FROM python:3.12.15-slim-trixie AS build
 RUN pip install --no-cache-dir uv==0.10.4
 WORKDIR /app
 COPY services/transcribe-worker/pyproject.toml services/transcribe-worker/uv.lock ./
@@ -6,7 +6,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY services/transcribe-worker/src ./src
 RUN uv sync --frozen --no-dev --no-editable
 
-FROM python:3.12.7-slim-bookworm
+FROM python:3.12.15-slim-trixie
 # Tesseract with English and Swedish language data, from Debian so it follows the base image.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-swe \

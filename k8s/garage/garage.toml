@@ -7,7 +7,7 @@ replication_factor = 1
 
 rpc_bind_addr = "0.0.0.0:3901"
 rpc_public_addr = "127.0.0.1:3901"
-rpc_secret_file = "/secrets/rpc-secret"
+# rpc_secret and the admin token come from GARAGE_RPC_SECRET and GARAGE_ADMIN_TOKEN (the garage-secrets Secret).
 
 [s3_api]
 s3_region = "garage"
@@ -15,4 +15,3 @@ api_bind_addr = "0.0.0.0:3900"
 
 [admin]
 api_bind_addr = "0.0.0.0:3903"
-admin_token_file = "/secrets/admin-token"

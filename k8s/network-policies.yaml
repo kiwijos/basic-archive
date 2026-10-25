@@ -1,0 +1,658 @@
+# Default deny, then exactly the paths the services need. Every allowed connection appears twice, as an egress rule on
+# the caller and an ingress rule on the callee, because a connection needs both. The table of paths is in the README;
+# `make netpol-test` proves each one works and that others do not.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: ship-archive
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Name resolution is the one thing every pod needs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: ship-archive
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+# The Ingress controller (Traefik) reaches web-ui, and nothing else does from outside the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller-to-web-ui
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: web-ui
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - {protocol: TCP, port: 8080}
+---
+# The Ingress controller (Traefik) reaches catalog-api, and nothing else does from outside the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller-to-catalog-api
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: catalog-api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - {protocol: TCP, port: 8000}
+---
+# The Ingress controller (Traefik) reaches search-api, and nothing else does from outside the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller-to-search-api
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: search-api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - {protocol: TCP, port: 8000}
+---
+# The Ingress controller (Traefik) reaches cantaloupe, and nothing else does from outside the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller-to-cantaloupe
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: cantaloupe
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - {protocol: TCP, port: 8182}
+---
+# catalog-api -> postgres:5432: the catalog itself.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-catalog-api-to-postgres
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: catalog-api
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - {protocol: TCP, port: 5432}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-from-catalog-api
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: catalog-api
+      ports:
+        - {protocol: TCP, port: 5432}
+---
+# catalog-api-migrate -> postgres:5432: the schema migration.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-catalog-api-migrate-to-postgres
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: catalog-api-migrate
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - {protocol: TCP, port: 5432}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-from-catalog-api-migrate
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: catalog-api-migrate
+      ports:
+        - {protocol: TCP, port: 5432}
+---
+# catalog-api -> garage:3900: stored scans (S3).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-catalog-api-to-garage
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: catalog-api
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: garage
+      ports:
+        - {protocol: TCP, port: 3900}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-garage-from-catalog-api
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: garage
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: catalog-api
+      ports:
+        - {protocol: TCP, port: 3900}
+---
+# catalog-api -> rabbitmq:5672: publishes the outbox events.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-catalog-api-to-rabbitmq
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: catalog-api
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: rabbitmq
+      ports:
+        - {protocol: TCP, port: 5672}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-rabbitmq-from-catalog-api
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: rabbitmq
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: catalog-api
+      ports:
+        - {protocol: TCP, port: 5672}
+---
+# transcribe-worker -> rabbitmq:5672: takes OCR jobs, publishes the next attempt.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-transcribe-worker-to-rabbitmq
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: transcribe-worker
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: rabbitmq
+      ports:
+        - {protocol: TCP, port: 5672}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-rabbitmq-from-transcribe-worker
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: rabbitmq
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: transcribe-worker
+      ports:
+        - {protocol: TCP, port: 5672}
+---
+# transcribe-worker -> catalog-api:8000: fetches a download address, posts the reading.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-transcribe-worker-to-catalog-api
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: transcribe-worker
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: catalog-api
+      ports:
+        - {protocol: TCP, port: 8000}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-catalog-api-from-transcribe-worker
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: catalog-api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: transcribe-worker
+      ports:
+        - {protocol: TCP, port: 8000}
+---
+# transcribe-worker -> garage:3900: downloads the scan from the address catalog-api signed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-transcribe-worker-to-garage
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: transcribe-worker
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: garage
+      ports:
+        - {protocol: TCP, port: 3900}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-garage-from-transcribe-worker
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: garage
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: transcribe-worker
+      ports:
+        - {protocol: TCP, port: 3900}
+---
+# indexer -> rabbitmq:5672: takes record.changed events.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-indexer-to-rabbitmq
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: indexer
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: rabbitmq
+      ports:
+        - {protocol: TCP, port: 5672}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-rabbitmq-from-indexer
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: rabbitmq
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: indexer
+      ports:
+        - {protocol: TCP, port: 5672}
+---
+# indexer -> catalog-api:8000: fetches the indexing view of a record.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-indexer-to-catalog-api
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: indexer
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: catalog-api
+      ports:
+        - {protocol: TCP, port: 8000}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-catalog-api-from-indexer
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: catalog-api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: indexer
+      ports:
+        - {protocol: TCP, port: 8000}
+---
+# indexer -> meilisearch:7700: writes the index.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-indexer-to-meilisearch
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: indexer
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: meilisearch
+      ports:
+        - {protocol: TCP, port: 7700}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-meilisearch-from-indexer
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: meilisearch
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: indexer
+      ports:
+        - {protocol: TCP, port: 7700}
+---
+# search-api -> meilisearch:7700: the only thing search-api talks to.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-search-api-to-meilisearch
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: search-api
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: meilisearch
+      ports:
+        - {protocol: TCP, port: 7700}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-meilisearch-from-search-api
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: meilisearch
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: search-api
+      ports:
+        - {protocol: TCP, port: 7700}
+---
+# cantaloupe -> garage:3900: reads the original scans (read-only key).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cantaloupe-to-garage
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: cantaloupe
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: garage
+      ports:
+        - {protocol: TCP, port: 3900}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-garage-from-cantaloupe
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: garage
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: cantaloupe
+      ports:
+        - {protocol: TCP, port: 3900}
+---
+# garage-init -> garage:3903: prepares the buckets and keys.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-garage-init-to-garage
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: garage-init
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: garage
+      ports:
+        - {protocol: TCP, port: 3903}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-garage-from-garage-init
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: garage
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: garage-init
+      ports:
+        - {protocol: TCP, port: 3903}
+---
+# meilisearch-init -> meilisearch:7700: registers the per-service keys.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-meilisearch-init-to-meilisearch
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: meilisearch-init
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: meilisearch
+      ports:
+        - {protocol: TCP, port: 7700}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-meilisearch-from-meilisearch-init
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: meilisearch
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: meilisearch-init
+      ports:
+        - {protocol: TCP, port: 7700}
+---
+# catalog-api asks Wikidata (port 443) and no other address outside the cluster. Wikidata's addresses change, so
+# this is "the public internet, HTTPS only": the private ranges, which hold the cluster and the host, are excluded.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-catalog-api-to-the-internet
+  namespace: ship-archive
+spec:
+  podSelector:
+    matchLabels:
+      app: catalog-api
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]
+      ports:
+        - {protocol: TCP, port: 443}

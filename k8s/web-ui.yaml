@@ -30,6 +30,8 @@ spec:
       labels:
         app: web-ui
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       containers:
         - name: web-ui
           image: kiwijos/ship-archive-web-ui
