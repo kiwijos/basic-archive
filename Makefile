@@ -1,4 +1,4 @@
-.PHONY: cluster-tools secrets deploy demo seed demo-check reset audit netpol-test credentials-test exposure-test tls-test secrets-scan trivy security-test scale-test rollout-test persistence-test hpa-test smoke e2e reindex iiif-limits ocr-parallel resilience test test-db
+.PHONY: cluster-tools secrets deploy demo seed demo-check reset docs-check audit netpol-test credentials-test exposure-test tls-test secrets-scan trivy security-test scale-test rollout-test persistence-test hpa-test smoke e2e reindex iiif-limits ocr-parallel resilience test test-db
 
 # One-time cluster prerequisites: Traefik and metrics-server (needs helm).
 cluster-tools:
@@ -41,6 +41,11 @@ demo-check:
 # Deletes the ship-archive namespace and everything in it, after asking. Then `make demo` starts from nothing.
 reset:
 	./scripts/reset.sh
+
+# The written deliverables: links resolve, every component is in the architecture table, every ADR is linked from its
+# document, every demo step exists and every make command in it is real. Needs no cluster.
+docs-check:
+	python3 scripts/check_docs.py
 
 # Static check of the manifests against the security rules (non-root, no capabilities, read-only filesystems, no API
 # tokens, default-deny, who may read each Secret, TLS on the Ingress, no real secret). Needs no cluster.
@@ -133,4 +138,5 @@ test:
 	cd services/search-api && uv run pytest -q
 	cd seed && uv run pytest -q
 	cd hardening && uv run pytest -q
+	python3 scripts/check_docs.py
 	cd services/web-ui && npm test

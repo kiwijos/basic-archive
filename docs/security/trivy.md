@@ -1,6 +1,6 @@
 # Image scans (trivy)
 
-Every custom image of release 0.12.0, scanned on 2026-10-25 with trivy 0.58.0 (`aquasec/trivy:0.58.0`; the vulnerability database is the day's). Regenerate with `make trivy`, which fails on a HIGH or CRITICAL finding that has a fix available in an image that is not Cantaloupe. The scan covers operating-system packages, Python and Java libraries, secrets baked into layers, and Dockerfile misconfigurations.
+Every custom image of release 0.13.0, scanned on 2026-10-26 with trivy 0.58.0 (`aquasec/trivy:0.58.0`; the vulnerability database is the day's). Regenerate with `make trivy`, which fails on a HIGH or CRITICAL finding that has a fix available in an image that is not Cantaloupe. The scan covers operating-system packages, Python and Java libraries, secrets baked into layers, and Dockerfile misconfigurations.
 
 | Image | Base | Critical | High | Medium | Low | High/critical with a fix | Secrets in layers | Was (critical/high) before this slice |
 |---|---|---|---|---|---|---|---|---|

@@ -87,22 +87,27 @@ POLICY
     --env="IMAGE=$image" --env="WIDTH=$width" --env="SECONDS_TO_RUN=$seconds" --command -- python -c '
 import os, random, threading, time, urllib.request
 image, width, until = os.environ["IMAGE"], int(os.environ["WIDTH"]), time.time() + int(os.environ["SECONDS_TO_RUN"])
+counts = {"ok": 0, "failed": 0}
 def fetch():
     while time.time() < until:
         size = random.choice((1024, 2048, 3072))
         x, y = random.randrange(0, max(1, width - size)), random.randrange(0, max(1, width // 2 - size))
         try:
-            urllib.request.urlopen(f"http://cantaloupe:8182/iiif/3/{image}/{x},{y},{size},{size}/!512,/0/default.jpg", timeout=30).read()
+            urllib.request.urlopen(f"http://cantaloupe:8182/iiif/3/{image}/{x},{y},{size},{size}/!512,512/0/default.jpg", timeout=30).read()
+            counts["ok"] += 1
         except Exception:
+            counts["failed"] += 1
             time.sleep(0.2)
 threads = [threading.Thread(target=fetch) for _ in range(24)]
 [t.start() for t in threads]
 [t.join() for t in threads]
+print("tiles answered: %d, failed: %d" % (counts["ok"], counts["failed"]))
 ' >/dev/null
   echo "tile load: random tiles of $image (${width} px wide), 24 clients, ${seconds} s"
 }
 
 stop_tile_load() {
-  kubectl -n "$NAMESPACE" delete pod tile-load --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  # No grace period and wait for it: a load that lingers after the test says it is done lands on whatever runs next.
+  kubectl -n "$NAMESPACE" delete pod tile-load --ignore-not-found --grace-period=0 --force --wait=true >/dev/null 2>&1 || true
   kubectl -n "$NAMESPACE" delete networkpolicy tile-load-egress tile-load-ingress --ignore-not-found >/dev/null 2>&1 || true
 }

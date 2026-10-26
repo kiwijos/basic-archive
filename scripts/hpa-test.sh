@@ -15,6 +15,18 @@ ids_file=$(mktemp)
 replicas() { kubectl -n "$NAMESPACE" get hpa "$1" -o jsonpath='{.status.currentReplicas}'; }
 cpu() { kubectl -n "$NAMESPACE" get hpa "$1" -o jsonpath='{.status.currentMetrics[0].resource.current.averageUtilization}'; }
 
+# Start from rest: an autoscaler still settling from an earlier load would hide a scale-up, or invent one.
+min_of() { kubectl -n "$NAMESPACE" get hpa "$1" -o jsonpath='{.spec.minReplicas}'; }
+echo "Waiting for every autoscaler to be at its minimum before the load starts (up to ${SETTLE_SECONDS} s)"
+rest_deadline=$((SECONDS + SETTLE_SECONDS))
+while true; do
+  resting=true
+  for h in "${HPAS[@]}"; do [ "$(replicas "$h")" -le "$(min_of "$h")" ] || resting=false; done
+  $resting && break
+  [ "$SECONDS" -lt "$rest_deadline" ] || fail "the autoscalers did not come to rest within ${SETTLE_SECONDS} s"
+  sleep 10
+done
+
 image=$(biggest_image)
 
 # Indexed arrays, not associative ones: macOS ships bash 3.2.
@@ -39,6 +51,12 @@ while [ "$SECONDS" -lt "$deadline" ]; do
   echo "  +$((SECONDS - (deadline - LOAD_SECONDS - 30)))s$line"
   sleep 10
 done
+
+# A load that was refused is no load at all: the pod says how many tiles it got answered.
+kubectl -n "$NAMESPACE" wait --for=jsonpath='{.status.phase}'=Succeeded pod/tile-load --timeout=90s >/dev/null 2>&1 || true
+answered=$(kubectl -n "$NAMESPACE" logs tile-load 2>/dev/null | sed -n 's/^tiles answered: \([0-9]*\),.*/\1/p')
+echo "tiles answered during the load: ${answered:-unknown}"
+[ "${answered:-0}" -ge 100 ] || fail "the tile load was refused or barely answered (${answered:-no report} tiles), so this run shows nothing about autoscaling"
 
 scaled=0
 echo "Replicas, at the start and at the peak:"
