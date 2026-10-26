@@ -28,7 +28,14 @@ def create_app(settings: Settings) -> FastAPI:
         yield
         await meili.close()
 
-    app = FastAPI(title="search-api", lifespan=lifespan)
+    # Under the API's own prefix, the only part of the address the Ingress sends here, as catalog-api does.
+    app = FastAPI(
+        title="search-api",
+        lifespan=lifespan,
+        openapi_url="/api/search/openapi.json",
+        docs_url="/api/search/docs",
+        redoc_url=None,
+    )
     cache = TtlCache(settings.cache_ttl_seconds, settings.cache_max_entries, settings.cache_max_bytes)
     limiter = RateLimiter(settings.rate_limit_per_minute, settings.rate_limit_window_seconds, settings.rate_limit_max_clients)
 

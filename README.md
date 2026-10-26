@@ -1,12 +1,34 @@
 # Ship Archive Lite
 
-A microservice archive for scanned ship documents. See [GLOSSARY.md](GLOSSARY.md) for the vocabulary and [docs/adr](docs/adr) for the design decisions.
+A microservice archive for scanned ship documents, built for a Kubernetes course. Staff upload an Image of a Document, a machine reads its text, a person corrects it, and the public searches everything (including by the names a ship carried in the past) and zooms deep into the Image. Five self-created services (catalog-api, search-api, indexer, transcribe-worker, web-ui) run on Kubernetes beside Postgres, RabbitMQ, Meilisearch, Garage and Cantaloupe, and consume Wikidata's REST API. See [GLOSSARY.md](GLOSSARY.md) for the vocabulary.
+
+## Documents
+
+| Read | For |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | What runs and why: the component table (self-created or third-party, and why each third-party service exists), the logical components and the services that implement them, the patterns used, and diagrams |
+| [docs/security.md](docs/security.md) | The threats, what was done and what is proposed, why there is no crew data (GDPR and CC0), OIDC for production, and the known limitations |
+| [docs/discussion.md](docs/discussion.md) | Benefits and challenges, and why the application is too small to need any of this and what to pretend |
+| [docs/demo.md](docs/demo.md) | The demo script: every command and click, from an empty cluster to every acceptance criterion |
+| [docs/security/trivy.md](docs/security/trivy.md), [docs/security/cloud-tls.md](docs/security/cloud-tls.md), [seed/SOURCES.md](seed/SOURCES.md) | The image scans, cloud TLS with cert-manager (described, not built), and where the demo data comes from |
+
+The design decisions are recorded as ADRs, each linked from the document it belongs to: [0001](docs/adr/0001-append-only-transcriptions-with-source.md) transcriptions are append-only, [0002](docs/adr/0002-no-person-or-crew-data.md) no person or crew data, [0003](docs/adr/0003-transactional-outbox.md) the transactional outbox, [0004](docs/adr/0004-subjects-with-dated-names-and-relations.md) dated names and relations, [0005](docs/adr/0005-derived-search-index-and-per-service-keys.md) the derived index and per-service keys, [0006](docs/adr/0006-cantaloupe-serves-originals-by-image-id.md) the image server, [0007](docs/adr/0007-wikidata-matches-are-chosen-by-a-person-and-fetched-by-the-server.md) Wikidata, [0008](docs/adr/0008-the-demo-is-seeded-through-the-public-api-with-source-keys.md) the seed, [0009](docs/adr/0009-the-indexer-runs-as-hot-standbys.md) the hot-standby indexer and [0010](docs/adr/0010-security-deny-by-default-with-proofs.md) security. `make docs-check` verifies the documents (links, the component table, every ADR linked, every demo step).
 
 ## Prerequisites
 
-- Docker Desktop with Kubernetes enabled (at least 12 GB of memory recommended)
+- Docker Desktop with Kubernetes enabled, as a kind cluster (at least 12 GB of memory recommended, 16 GB as designed)
 - `kubectl`, `helm`, `uv`, `jq`, `make`
-- To run the worker tests locally: Tesseract with English and Swedish data (`brew install tesseract`, plus `swe.traineddata` from `tessdata_fast` in `~/.cache/tessdata`, or your package manager's Swedish pack)
+- To run the tests locally: Postgres, RabbitMQ and Meilisearch containers (`make test-db`), and Tesseract with English and Swedish data (`brew install tesseract`, plus `swe.traineddata` from `tessdata_fast` in `~/.cache/tessdata`, or your package manager's Swedish pack)
+- Network access: images come from Docker Hub, and the demo data fetches four public-domain drawings from Wikimedia Commons (without a network they are skipped with a message)
+
+## Quick start
+
+```
+make cluster-tools   # once per cluster: Traefik and metrics-server, versions pinned
+make demo            # the one command: deploy, wait for readiness, load the demo data, check it (about a minute)
+```
+
+Then open **https://localhost** (the certificate is self-signed, so the browser warns once; `http://localhost` works too). You see the public search page, loaded with a fictional fleet, thirteen Swedish documents of varying scan quality and four real eighteenth-century ship plans. Search for `Nordstjarnan` (misspelled, and a name the ship no longer has) or `Hagbåt` and zoom in. Staff sign in at `/review` with the token that `make deploy` created; [docs/demo.md](docs/demo.md) shows how and walks through everything. `make reset` wipes the cluster's data and starts again.
 
 ## Running on Docker Desktop Kubernetes
 
@@ -175,7 +197,7 @@ A single instance is unreachable for a moment after its pod is replaced (the Ser
 
 That is a measured peak, not a proof of the worst case, and it should not be read as one. Under this load a Cantaloupe pod stayed at about 240 MiB, though a single pod was seen at 1.1 to 1.2 GiB earlier, after it first decoded the large plates, so the figure depends on what has been served. The ceiling if every pod reached its limit at the autoscalers' maximum is 14.4 GiB (catalog-api 4 x 256 MiB, search-api 4 x 256, worker 4 x 1 GiB, Cantaloupe 3 x 1.5 GiB, web-ui 3 x 128, indexer 3 x 256, the four stateful pods 2.8 GiB), and with the roughly 2 GiB the node itself uses that would not fit in 16 GiB. Reaching it needs every service at its maximum and its limit at once, which no load here came near, but it is why the maxima are low and every container has a memory limit: a runaway pod is killed and restarted rather than starving the node. The requests, which is what the scheduler promises, total about 6.3 GiB at the maxima. There are no CPU limits, on purpose: the autoscalers scale on CPU relative to the request, and a limit would throttle a pod just as it needs to burst.
 
-**Load.** `make hpa-test` loads the archive until an autoscaler adds replicas. With 80 scans uploaded at once, transcribe-worker went from 1 to 4 replicas at 197% of its CPU request and settled back afterwards; under random tile requests from inside the cluster (past the Ingress limit, which exists to stop exactly this) Cantaloupe went from 1 to 2 at 94% and also settled back. catalog-api scaled from 2 to 4 on its own while the demo data was being seeded. search-api was not pushed past its target: its public rate limit keeps one client from loading it.
+**Load.** `make hpa-test` waits until every autoscaler is at its minimum, then loads the archive until one adds replicas: 24 clients inside the cluster request random tiles of the largest seeded plate (past the Ingress limit, which exists to stop exactly this) while twenty Images are uploaded, and the test prints each autoscaler's replicas at the start and at the peak. Recorded run: transcribe-worker went from 1 to 2 replicas and Cantaloupe from 1 to 3, and both settled back afterwards. In an earlier run with eighty Images uploaded at once, transcribe-worker went from 1 to 4 at 197% of its CPU request. catalog-api scaled from 2 to 4 on its own while the demo data was being seeded. search-api was not pushed past its target: its public rate limit keeps one client from loading it. (An earlier version of this test asked Cantaloupe for tiles with an invalid size and was refused instantly; the test now counts the tiles that were answered, and a run in which none are is not a pass.)
 
 ## Wikidata
 

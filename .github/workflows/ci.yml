@@ -107,6 +107,13 @@ jobs:
       - name: Scan the repository for secrets
         run: docker run --rm -v "$PWD:/src:ro" aquasec/trivy:0.58.0 fs --scanners secret --exit-code 1 --skip-dirs /src/.git /src
 
+  # The written deliverables: links, the component table, every ADR linked, every demo step and `make` command real.
+  test-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 scripts/check_docs.py
+
   test-web-ui:
     runs-on: ubuntu-latest
     defaults:
@@ -125,7 +132,7 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, test-seed, test-hardening, test-web-ui]
+    needs: [test, test-seed, test-hardening, test-docs, test-web-ui]
     runs-on: ubuntu-latest
     strategy:
       matrix:
