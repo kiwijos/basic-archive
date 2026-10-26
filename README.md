@@ -89,7 +89,7 @@ make credentials-test  # each service's own credentials do only what that servic
 make exposure-test     # only the four public-facing services are reachable from outside the cluster
 make tls-test          # HTTPS through the Ingress, with the self-signed certificate in the cluster's Secret
 make secrets-scan      # no secret in any file, and none of the cluster's live secret values anywhere in git's history
-make trivy VERSION=0.12.0   # scans the six images and rewrites docs/security/trivy.md
+make trivy VERSION=0.13.0   # scans the six images and rewrites docs/security/trivy.md
 make security-test     # all of the above except trivy
 ```
 

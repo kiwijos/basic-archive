@@ -31,15 +31,9 @@ SELF_CREATED = ["catalog-api", "search-api", "indexer", "transcribe-worker", "we
 THIRD_PARTY = ["Postgres", "RabbitMQ", "Meilisearch", "Garage", "Cantaloupe", "Traefik", "metrics-server"]
 PATTERNS = ["microservices", "CQRS", "competing consumers", "event-driven", "eventual consistency", "stateless", "API gateway"]
 
-# Each is a heading the demo script must contain, so that it can be followed to every criterion.
-SPEC_CRITERIA = {
-    "A1": "one command", "A2": "ten uploads", "A3": "verified correction", "A4": "misspelled", "A5": "blueprint zooms",
-    "A6": "delete the Postgres pod", "A7": "reindex", "A8": "three replicas", "A9": "blocked",
-}
-ASSIGNMENT_CRITERIA = {
-    "R1": "two self-created services", "R2": "scale independently", "R3": "database survives restarts",
-    "R4": "Docker Hub", "R5": "external REST API", "R6": "reachable from outside",
-}
+# Steps the demo script must have, each a heading that starts with its id, so that it can be followed to every criterion:
+# A1-A9 are the whole-spec acceptance criteria, R1-R6 the assignment's own, S1 the rest of the spec's security list.
+DEMO_STEPS = [f"A{n}" for n in range(1, 10)] + [f"R{n}" for n in range(1, 7)] + ["S1"]
 
 problems: list[str] = []
 
@@ -49,7 +43,7 @@ def fail(message: str) -> None:
 
 
 def slug(heading: str) -> str:
-    text = re.sub(r"[`*_]", "", heading.strip().lower())
+    text = re.sub(r"[`*]", "", heading.strip().lower())
     text = re.sub(r"[^\w\s-]", "", text)
     return re.sub(r"\s", "-", text)
 
@@ -62,6 +56,19 @@ def headings(path: Path) -> set[str]:
         elif not in_code and re.match(r"#{1,6} ", line):
             found.add(slug(line.lstrip("# ")))
     return found
+
+
+def heading_texts(text: str) -> list[str]:
+    """The section headings (the title is not one: a document's name can mention everything it covers)."""
+    return [line.lstrip("# ").lower() for line in re.sub(r"```.*?```", "", text, flags=re.S).splitlines() if re.match(r"#{2,6} ", line)]
+
+
+def require_headings(name: str, text: str, words: tuple[str, ...]) -> None:
+    """Each word must appear in a heading, not merely somewhere in the prose."""
+    found = heading_texts(text)
+    for word in words:
+        if not any(word in heading for heading in found):
+            fail(f"{name} has no heading about '{word}'")
 
 
 def read(name: str) -> str:
@@ -79,7 +86,7 @@ def check_links() -> None:
     for source in markdown_files():
         text = re.sub(r"```.*?```", "", source.read_text(), flags=re.S)
         for target in re.findall(r"\]\(([^)\s]+)\)", text):
-            if re.match(r"[a-z]+:", target) or target.startswith("#") and False:
+            if re.match(r"[a-z]+:", target):  # an address outside the repository
                 continue
             path_part, _, anchor = target.partition("#")
             resolved = source if not path_part else (source.parent / path_part).resolve()
@@ -142,9 +149,7 @@ def check_architecture() -> None:
     for pattern in PATTERNS:
         if pattern.lower() not in lowered:
             fail(f"architecture.md does not name the pattern '{pattern}'")
-    for heading in ("logical components", "diagram"):
-        if heading not in lowered:
-            fail(f"architecture.md has no '{heading}' section")
+    require_headings("architecture.md", text, ("components", "logical components", "diagram", "patterns"))
     if "```mermaid" not in text:
         fail("architecture.md has no diagram (a mermaid block)")
 
@@ -160,9 +165,7 @@ def check_security() -> None:
     for word in ("GDPR", "CC0", "OIDC", "per-replica", "single instance"):
         if word.lower() not in lowered:
             fail(f"security.md does not mention '{word}'")
-    for heading in ("known limitations", "proposed"):
-        if heading not in lowered:
-            fail(f"security.md has no '{heading}' section")
+    require_headings("security.md", text, ("threats", "known limitations", "proposed", "gdpr"))
 
 
 def check_discussion() -> None:
@@ -170,9 +173,7 @@ def check_discussion() -> None:
     if not text:
         return
     lowered = text.lower()
-    for heading in ("benefits", "challenges", "too small", "pretend"):
-        if heading not in lowered:
-            fail(f"discussion.md has no '{heading}' section or mention")
+    require_headings("discussion.md", text, ("benefits", "challenges", "too small", "pretend"))
     for word in ("Kraken", "eScriptorium", "local-path", "eventual consistency", "single-instance", "object storage", "operational complexity", "fault isolation"):
         if word.lower() not in lowered:
             fail(f"discussion.md does not mention '{word}'")
@@ -186,9 +187,9 @@ def check_demo() -> None:
     text = read("docs/demo.md")
     if not text:
         return
-    for identifier, topic in {**SPEC_CRITERIA, **ASSIGNMENT_CRITERIA}.items():
+    for identifier in DEMO_STEPS:
         if not re.search(rf"^#+ {identifier}\b", text, flags=re.M):
-            fail(f"demo.md has no step headed {identifier} ({topic})")
+            fail(f"demo.md has no step headed {identifier}")
     targets = make_targets()
     for command in re.findall(r"^\s*make ([a-z][a-z0-9-]*)", text, flags=re.M):
         if command not in targets:

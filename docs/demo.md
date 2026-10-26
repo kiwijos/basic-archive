@@ -11,13 +11,14 @@ This is the script for showing Ship Archive Lite from an empty cluster to every 
 | [A5](#a5-a-blueprint-zooms-smoothly) | A blueprint zooms smoothly | 2 min |
 | [A6](#a6-delete-the-postgres-pod-and-lose-nothing) | Deleting the Postgres pod loses no data | 3 min |
 | [A7](#a7-a-reindex-rebuilds-the-search-index-from-nothing) | A reindex rebuilds the search index from nothing | 3 min |
-| [A8](#a8-every-service-runs-at-three-replicas-without-errors) | Every self-created service runs at three replicas | 4 min |
+| [A8](#a8-every-service-runs-at-three-replicas-without-errors) | Every service the project builds or serves runs at three replicas | 4 min |
 | [A9](#a9-a-direct-connection-from-search-api-to-postgres-is-blocked) | A direct connection from search-api to Postgres is blocked | 2 min |
-| [R1](#r1-at-least-two-self-created-services-with-rest-apis) to [R6](#r6-reachable-from-outside-the-cluster) | The assignment's own criteria | 10 min |
+| [R1](#r1-at-least-two-self-created-services-with-rest-apis) to [R6](#r6-reachable-from-outside-the-cluster) | The assignment's own criteria | 15 min |
+| [S1](#s1-secrets-containers-and-images) | Secrets, containers and images | 2 min |
 
 ## Before you start
 
-You need Docker Desktop with Kubernetes enabled (a kind cluster, 16 GB), and `kubectl`, `helm`, `uv`, `jq` and `make` on the path ([README](../README.md#prerequisites)). Open two terminals in the repository, **A** for commands and **B** for watching, and a browser.
+The manifests pin an exact version of every image (`k8s/kustomization.yaml`), and the cluster pulls them from Docker Hub, so the release they name must have been published: CI does that when the version is tagged. You need Docker Desktop with Kubernetes enabled (a kind cluster, 16 GB), and `kubectl`, `helm`, `uv`, `jq` and `make` on the path ([README](../README.md#prerequisites)). Open two terminals in the repository, **A** for commands and **B** for watching, and a browser.
 
 Start from nothing. On a cluster that has run the system before, wipe it (it asks you to type `ship-archive`); on a cluster that has never had the cluster tooling, install it once (a few minutes):
 
@@ -51,7 +52,7 @@ In terminal A, the one command:
 make demo
 ```
 
-**You should see**, in about a minute: the Secrets created, every workload reported as rolled out, then the seed (counts of what was made: 4 ships, 3 organisations, 13 documents with 14 pages, 3 plate documents), the OCR accuracy table, and a demo check that ends with eight lines starting `ok` and no `FAIL`. Press Ctrl-C in terminal B. Then run the shared setup from [Before you start](#before-you-start) in terminal A.
+**You should see**, in about a minute: the Secrets created, every workload reported as rolled out, then the seed (counts of what was made: 4 ships, 3 organisations, 13 Documents with 14 Images, 3 plate documents), the OCR accuracy table, and a demo check that ends with eight lines starting `ok` and no `FAIL`. Press Ctrl-C in terminal B. Then run the shared setup from [Before you start](#before-you-start) in terminal A.
 
 Run it again to show that the seed is safe to repeat:
 
@@ -79,13 +80,13 @@ In terminal A:
 make ocr-parallel
 ```
 
-**You should see** in terminal B two more workers appear and become `Running` within seconds (and disappear again when the script puts the deployment back). In terminal A: three workers made ready, ten pages uploaded at once, all ten reaching `ocr_done`, each with exactly one Machine transcription, and a count of how many each worker read, taken from their logs (for example 3, 4 and 3), ending `OK: 10 Images read by 3 workers in parallel, each exactly once`. Press Ctrl-C in terminal B.
+**You should see** in terminal B two more workers appear and become `Running` within seconds (and disappear again when the script puts the deployment back). In terminal A: three workers made ready, ten Images uploaded at once, all ten reaching `ocr_done`, each with exactly one Machine transcription, and a count of how many each worker read, taken from their logs (for example 3, 4 and 3), ending `OK: 10 Images read by 3 workers in parallel, each exactly once`. Press Ctrl-C in terminal B.
 
 ## A3 A verified correction appears in public search within seconds
 
 *Shows:* "A verified correction appears in public search within seconds" (eventual consistency, the outbox and the indexer).
 
-In terminal A, make an Image to upload (a typed Swedish test page) and copy the staff token:
+In terminal A, make an Image to upload (a typed Swedish test Image) and copy the staff token:
 
 ```
 uv run --quiet --no-project --with pillow==11.3.0 python scripts/make_scan.py /tmp/demo-letter.png demo1
@@ -117,8 +118,8 @@ Back in the browser:
 In the browser, on **https://localhost**:
 
 1. Click **Ships and organisations**. In **Search the archive** type `Nordstjarnan` (with an a, no dots) and click **Search**.
-2. The result is the ship **Havsörnen**, and it says it matched the former name **Nordstjärnan**: the query was misspelled and it is also a name the ship no longer has. Click the result.
-3. The Ship page lists the ship's three names over time (Nordstjärnan, Sofia, Havsörnen), its owners and builder, the sale in 1903, and a link to the Documents that are about it. The name that matched your search is marked.
+2. The result is the ship **Havsörnen**, and it says it matched the former name **Nordstjärnan** (the interface's own wording): the query was misspelled, and the Name is one the ship no longer has. Click the result.
+3. The Ship page lists the ship's three names over time (Nordstjärnan, Sofia, Havsörnen), its builder and owners (Organisations), the sale in 1903, and a link to the Documents that are about it. The name that matched your search is marked.
 4. Click **← Back to your search**: your search is as you left it, from its address.
 
 Try `Havsornen` and `Sofia` as well: all three find the same ship. Then click the Ship **Älvdrottningen**: it is a new ship, rebuilt from Havsörnen's hull in 1933, and the two pages link to each other.
@@ -140,7 +141,7 @@ IMAGE=$(curl -skG https://localhost/api/search/documents --data-urlencode q=Hagb
 curl -sk "https://localhost/iiif/3/$IMAGE/info.json" | jq '{protocol, width, height}'
 ```
 
-**You should see** `"width": 8928` and `"height": 6383`. The image server cut a 58-megapixel drawing into tiles on demand, from the original in object storage ([ADR 0006](adr/0006-cantaloupe-serves-originals-by-image-id.md)).
+**You should see** `"width": 8928` and `"height": 6383`. The image server cut a 57-megapixel drawing into tiles on demand, from the original in object storage ([ADR 0006](adr/0006-cantaloupe-serves-originals-by-image-id.md)).
 
 ## A6 Delete the Postgres pod and lose nothing
 
@@ -169,22 +170,22 @@ make persistence-test
 
 *Shows:* "A reindex rebuilds the index from scratch" (the index is derived and disposable, [ADR 0005](adr/0005-derived-search-index-and-per-service-keys.md)).
 
-First show that search works, then destroy the index inside Meilisearch (the master key is read inside the pod and never leaves it):
+First show that search works, then destroy the index inside Meilisearch. The master key is read from the pod's own environment and handed to `curl` as a header on its standard input, so it is never in a process's arguments and never leaves the pod:
 
 ```
 curl -skG https://localhost/api/search/subjects --data-urlencode q=Havsörnen | jq '.hits | length'
-kubectl -n $NS exec meilisearch-0 -- sh -c 'curl -s -X DELETE -H "Authorization: Bearer $MEILI_MASTER_KEY" http://localhost:7700/indexes/documents; curl -s -X DELETE -H "Authorization: Bearer $MEILI_MASTER_KEY" http://localhost:7700/indexes/subjects'
+kubectl -n $NS exec meilisearch-0 -- sh -c 'for index in documents subjects; do printf "Authorization: Bearer %s" "$MEILI_MASTER_KEY" | curl -s -X DELETE -H @- http://localhost:7700/indexes/$index; done'
 sleep 3
-curl -skG https://localhost/api/search/subjects --data-urlencode q=Havsörnen --data-urlencode "_=$RANDOM" | jq '.hits | length, .error // .detail'
+curl -skG https://localhost/api/search/subjects --data-urlencode q=Havsörnen --data-urlencode "_=$RANDOM" | jq '(.hits | length), (.error // .detail)'
 ```
 
-**You should see** a hit before (Meilisearch prints two task records for the deletion), and none after: the public search is empty, while the catalog in Postgres is untouched. Now rebuild it:
+**You should see** a hit before (Meilisearch prints two task acknowledgements for the deletion), and after it `0` and the message `Search is not available right now`: the public search is empty, while the catalog in Postgres is untouched. Now rebuild it:
 
 ```
 make reindex
 ```
 
-**You should see** a line that names the active indexer, then `{"state": "done", "indexed": ..., "removed": 0, "error": null}` with the number of records. Search again, and Havsörnen is back, as is everything else; reload **https://localhost** and search for `zebrafink`.
+**You should see** a line that names the active indexer, then `{"state": "done", "indexed": ..., "removed": 0, "error": null}` with the number of Documents and Subjects indexed. Search again, and Havsörnen is back, as is everything else; reload **https://localhost** and search for `zebrafink`.
 
 ## A8 Every service runs at three replicas without errors
 
@@ -195,7 +196,7 @@ kubectl -n $NS get hpa
 make scale-test
 ```
 
-**You should see** the four autoscalers (catalog-api, search-api, transcribe-worker, Cantaloupe) with their minimum and maximum replicas and current CPU. `make scale-test` raises each autoscaler's minimum to three, waits until all six self-created services (including web-ui and the indexer) show `3/3`, runs the smoke test, ten uploads and a tile hammering against them, and ends with the peak memory of the pods and of the whole node out of the 16 GiB, and `OK: three replicas of every service, no restarts, nothing unready, no out-of-memory kills, no unhandled exceptions`. It puts the minimums back afterwards. This takes about three minutes.
+**You should see** the four autoscalers (catalog-api, search-api, transcribe-worker, Cantaloupe) with their minimum and maximum replicas and current CPU. `make scale-test` raises each autoscaler's minimum to three, waits until all six services (the five self-created ones, including web-ui and the indexer, and Cantaloupe) show `3/3`, runs the smoke test, ten uploads and a tile hammering against them, and ends with the peak memory of the pods and of the whole node out of the 16 GiB, and `OK: three replicas of every service, no restarts, nothing unready, no out-of-memory kills, no unhandled exceptions`. It puts the minimums back afterwards. This takes about three minutes.
 
 ## A9 A direct connection from search-api to Postgres is blocked
 
@@ -239,13 +240,21 @@ Different services grow on different load, with no change to the others. Run the
 make hpa-test
 ```
 
-**You should see**, over about five minutes, lines of `catalog-api=… search-api=… transcribe-worker=… cantaloupe=…` with their CPU, then for example `transcribe-worker 1 -> 4` and `cantaloupe 1 -> 2` while the others stay put, and finally that they settled back. To show the manual side, in terminal A: `kubectl -n $NS get deploy` before and after A2 (the worker deployment grew and shrank; the others did not).
+**You should see**, over about eight minutes (it first waits for every autoscaler to be at its minimum), lines of `catalog-api=… search-api=… transcribe-worker=… cantaloupe=…` with their CPU, a count of the tiles that were answered (thousands), then the replicas at the start and at the peak: in the recorded run `transcribe-worker 1 -> 2` and `cantaloupe 1 -> 3`, with search-api unchanged (its public rate limit keeps one client from loading it) and catalog-api at most a little higher. The numbers differ from run to run; what matters is that more than one autoscaler adds replicas under load, independently of the others, and that they settle back. To show the manual side, in terminal A: `kubectl -n $NS get deploy` before and after A2 (the worker deployment grew and shrank; the others did not).
 
 ## R3 The database survives restarts
 
 *Shows:* "A database that survives restarts."
 
-This is [A6](#a6-delete-the-postgres-pod-and-lose-nothing). To go one step further and restart the whole cluster's workloads: `kubectl -n $NS rollout restart deploy`, then reload the Ship page. Say plainly that the volumes survive a restart but **not a Kubernetes reset** ([discussion.md](discussion.md#challenges)), which is why `make demo` rebuilds the demo in a minute.
+This is [A6]. To go further, restart all four stateful services at once, which is what a cluster restart does to them, and check that the data is all still there:
+
+```
+kubectl -n $NS rollout restart statefulset
+for s in postgres garage meilisearch rabbitmq; do kubectl -n $NS rollout status statefulset/$s --timeout=300s; done
+curl -sk -H @/tmp/demo-auth "https://localhost/api/catalog/ships?source_system=seed" | jq length
+```
+
+**You should see** each StatefulSet roll out in turn and `4` again (repeat the last command if the API still answers with an error for a moment). Reload the Ship page for Havsörnen: nothing is missing. Say plainly that the volumes survive a deleted pod, a restart and a rollout but **not a Kubernetes reset** ([discussion.md](discussion.md#challenges)), which is why `make demo` rebuilds the demo in a minute.
 
 ## R4 Images on Docker Hub
 
@@ -278,7 +287,7 @@ curl -sk -X POST -H @/tmp/demo-auth -H 'Content-Type: application/json' -d '{"na
 Open the address it prints (you are still signed in; otherwise sign in at **/review** first). In the browser:
 
 1. The page says **No Wikidata match chosen yet**, and **Name to look for** is filled with `Vasa`. Click **Find on Wikidata**.
-2. A list of possible matches for "Vasa" appears, each with Wikidata's description, and each with **Open on Wikidata**. The first hits are not the ship (a city, a family): this is why a person chooses, never the system ([ADR 0007](adr/0007-wikidata-matches-are-chosen-by-a-person-and-fetched-by-the-server.md)).
+2. A list of possible matches for "Vasa" appears, each with Wikidata's description, and each with **Open on Wikidata**. When this was written the first hits were not the ship (a city, a family; Wikidata's results change, so yours may differ): this is why a person chooses, never the system ([ADR 0007](adr/0007-wikidata-matches-are-chosen-by-a-person-and-fetched-by-the-server.md)).
 3. Click the button **Choose Vasa (Q…) for this ship** on the entry that describes the 17th-century warship. You see "Stored Vasa (Q…) from Wikidata."
 4. Open the Ship's public page (**https://localhost/ships/…**, in a private window): a section **Elsewhere** links to the item, and the name, description and retrieval time are the ones Wikidata gave when the server asked.
 
@@ -297,6 +306,17 @@ make tls-test
 ```
 
 **You should see** the Ingress with its routes, then `OK: only the four public-facing services are reachable from outside the cluster` (Postgres, RabbitMQ, Meilisearch and Garage have no route and no open port) and `OK: HTTPS works through the Ingress with the self-signed certificate`.
+
+## S1 Secrets, containers and images
+
+*Shows:* the rest of the spec's Security list: "secrets committed only as templates", "non-root containers with dropped capabilities and read-only root filesystems", "trivy scans recorded".
+
+```
+make secrets-scan
+make audit
+```
+
+**You should see** `OK: no secret is in the repository, or ever was` after it searched for every live secret value in the working tree and in all of git's history, and `13 workloads audited, 0 finding(s), 2 stated exception(s)`: every container in the manifests runs non-root with every capability dropped, a read-only root filesystem and no Kubernetes API token, apart from one stated and explained exception ([security.md](security.md#threats-and-mitigations)). The image scans are recorded in [security/trivy.md](security/trivy.md), with every accepted finding explained; `make trivy VERSION=<release>` rescans the images and takes a few minutes.
 
 ## Afterwards
 
