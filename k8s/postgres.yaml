@@ -26,9 +26,16 @@ spec:
       labels:
         app: postgres
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # The alpine image's postgres user. Its data directory was already owned by it, from when the image switched to it itself.
+      securityContext:
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
       containers:
         - name: postgres
-          image: postgres:16.4-alpine
+          image: postgres:16.15-alpine
           ports:
             - containerPort: 5432
           env:
@@ -54,9 +61,27 @@ spec:
               memory: 256Mi
             limits:
               memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
   volumeClaimTemplates:
     - metadata:
         name: data

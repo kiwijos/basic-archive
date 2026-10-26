@@ -28,6 +28,38 @@ spec:
       labels:
         app: garage
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      initContainers:
+        # Garage once ran as root, so a volume from before slice 13 holds root-owned files. A volume of this kind is not
+        # re-owned by the kubelet, so this hands it to the user Garage now runs as. It does nothing on a volume that is
+        # already right, and goes once every cluster has been redeployed. The one container here allowed to be root.
+        - name: own-volume
+          image: busybox:1.37.0
+          command: ["chown", "-R", "10001:10001", "/var/lib/garage"]
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/garage
       containers:
         - name: garage
           image: dxflrs/garage:v2.4.1
@@ -38,6 +70,19 @@ spec:
               containerPort: 3901
             - name: admin
               containerPort: 3903
+          # Garage will only read a secret file that is mode 0600 and owned by its own user, which a Kubernetes
+          # Secret volume cannot be, so the two secrets reach it as environment variables.
+          env:
+            - name: GARAGE_RPC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: rpc-secret
+            - name: GARAGE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: admin-token
           # Garage has no shell and answers its health check only once a layout exists,
           # so readiness only asks that the S3 port is open; the init Job does the rest.
           readinessProbe:
@@ -55,23 +100,24 @@ spec:
               memory: 64Mi
             limits:
               memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           volumeMounts:
             - name: config
               mountPath: /etc/garage.toml
               subPath: garage.toml
-            - name: secrets
-              mountPath: /secrets
-              readOnly: true
             - name: data
               mountPath: /var/lib/garage
       volumes:
         - name: config
           configMap:
             name: garage-config
-        - name: secrets
-          secret:
-            secretName: garage-secrets
-            defaultMode: 0400
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -90,11 +136,16 @@ metadata:
 spec:
   backoffLimit: 10
   template:
+    metadata:
+      labels:
+        app: garage-init
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       restartPolicy: OnFailure
       containers:
         - name: init
-          image: python:3.12.7-slim-bookworm
+          image: python:3.12.15-slim-trixie
           command: ["python", "/init/init.py"]
           securityContext:
             runAsNonRoot: true
@@ -103,6 +154,8 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             requests:
               cpu: 10m

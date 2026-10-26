@@ -5,6 +5,11 @@ metadata:
   namespace: ship-archive
 spec:
   ingressClassName: traefik
+  # HTTPS with the self-signed certificate (scripts/create-secrets.sh). Plain HTTP is still served, so scripts on this
+  # machine need no certificate flags; see the README on why a real deployment would redirect it.
+  tls:
+    - hosts: [localhost]
+      secretName: ship-archive-tls
   rules:
     - http:
         paths:

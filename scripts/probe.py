@@ -15,7 +15,9 @@ import urllib.error
 import urllib.request
 
 WORKERS = 4
-TIMEOUT = 5
+TIMEOUT = 30  # long enough to see how slow a stalled request really was, instead of cutting it off
+FAIL_AFTER = 5.0  # an answer that takes longer than this is a failure: a visitor would have given up
+SLOW = 2.0  # answers between this and FAIL_AFTER are reported but do not fail the run
 
 
 def main() -> int:
@@ -25,6 +27,9 @@ def main() -> int:
         name, _, value = open(sys.argv[4]).read().strip().partition(":")
         headers[name] = value.strip()
     outcomes: collections.Counter = collections.Counter()
+    failures: list[tuple[float, str]] = []  # seconds since the start, and what happened
+    slow: list[tuple[float, float]] = []  # seconds since the start, and how long a successful request took
+    begun = time.monotonic()
     lock = threading.Lock()
     interval = WORKERS / rate
 
@@ -40,8 +45,15 @@ def main() -> int:
                 result = f"status {error.code}"
             except Exception as error:  # noqa: BLE001 - a refused or reset connection is a failure to count, not to crash on
                 result = f"error {type(error).__name__}"
+            took = time.monotonic() - started
+            if result == "ok" and took > FAIL_AFTER:
+                result = f"too slow ({took:.0f} s)"
             with lock:
                 outcomes[result] += 1
+                if result != "ok":
+                    failures.append((time.monotonic() - begun, result))
+                elif took > SLOW:
+                    slow.append((time.monotonic() - begun, took))
             time.sleep(max(0.0, interval - (time.monotonic() - started)))
 
     threads = [threading.Thread(target=work) for _ in range(WORKERS)]
@@ -49,8 +61,12 @@ def main() -> int:
         thread.start()
     for thread in threads:
         thread.join()
-    failed = {kind: count for kind, count in outcomes.items() if kind != "ok"}
+    failed = {kind.split(" (")[0] if kind.startswith("too slow") else kind: count for kind, count in outcomes.items() if kind != "ok"}
     print(f"{sum(outcomes.values())} requests, {outcomes['ok']} ok" + (f", FAILED: {failed}" if failed else ""))
+    if slow:
+        print(f"  {len(slow)} answered, but slowly (over {SLOW:g} s); the slowest took {max(t for _, t in slow):.1f} s, at " + ", ".join(f"{at:.1f}s" for at, _ in sorted(slow)[:6]))
+    if failures:
+        print("  failures at: " + ", ".join(f"{at:.1f}s {what}" for at, what in sorted(failures)[:12]))
     return 1 if failed else 0
 
 

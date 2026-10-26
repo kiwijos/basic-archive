@@ -30,6 +30,7 @@ spec:
       labels:
         app: cantaloupe
     spec:
+      automountServiceAccountToken: false
       # Kubernetes would otherwise add variables such as CANTALOUPE_PORT for each Service, in a
       # namespace that Cantaloupe's own settings could be confused with.
       enableServiceLinks: false

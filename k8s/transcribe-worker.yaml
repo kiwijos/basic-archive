@@ -18,6 +18,8 @@ spec:
       labels:
         app: transcribe-worker
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       # A job in hand is finished before the pod stops. OCR is cut off after 90 seconds, so this is enough.
       terminationGracePeriodSeconds: 120
       containers:

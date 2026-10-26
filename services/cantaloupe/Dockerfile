@@ -11,6 +11,8 @@ RUN curl -fsSL -o cantaloupe.zip "https://github.com/cantaloupe-project/cantalou
     && mv "cantaloupe-${CANTALOUPE_VERSION}/cantaloupe-${CANTALOUPE_VERSION}.jar" cantaloupe.jar
 
 FROM eclipse-temurin:21.0.12.1_1-jre-noble
+# The newest Temurin tag still trails Ubuntu's security updates, so apply them here.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
 RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin app \
     && mkdir -p /var/cache/cantaloupe && chown app /var/cache/cantaloupe
 COPY --from=release /release/cantaloupe.jar /opt/cantaloupe/cantaloupe.jar

@@ -5,7 +5,7 @@ description = "Ship Archive Lite search indexer"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "aio-pika==9.5.5",
-    "fastapi==0.115.6",
+    "fastapi==0.162.0",
     "httpx==0.28.1",
     "jsonschema==4.26.0",
     "pydantic-settings==2.7.0",

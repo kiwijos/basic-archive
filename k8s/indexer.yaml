@@ -19,6 +19,8 @@ spec:
       labels:
         app: indexer
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       containers:
         - name: indexer
           image: kiwijos/ship-archive-indexer

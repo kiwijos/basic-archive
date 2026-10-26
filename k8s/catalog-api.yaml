@@ -29,6 +29,8 @@ spec:
       labels:
         app: catalog-api
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       containers:
         - name: catalog-api
           image: kiwijos/ship-archive-catalog-api
@@ -73,6 +75,22 @@ spec:
               memory: 128Mi
             limits:
               memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          # Uploads over a megabyte are spooled to /tmp while they are checked and stored.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
 ---
 apiVersion: batch/v1
 kind: Job
@@ -82,12 +100,32 @@ metadata:
 spec:
   backoffLimit: 6
   template:
+    metadata:
+      labels:
+        app: catalog-api-migrate
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       restartPolicy: OnFailure
       initContainers:
         - name: wait-for-postgres
-          image: postgres:16.4-alpine
+          image: postgres:16.15-alpine
           command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -U postgres; do sleep 2; done"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
       containers:
         - name: migrate
           image: kiwijos/ship-archive-catalog-api
@@ -95,3 +133,18 @@ spec:
           envFrom:
             - secretRef:
                 name: catalog-api-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+
